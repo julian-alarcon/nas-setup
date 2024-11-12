@@ -147,15 +147,13 @@ Select as Dataset Preset `Apps`
 
 ### Applications setup
 
-### Setup Catalog
-
 #### Jellyfin
 
 Install from Applications (`community`)
 
-Dataset: `/ssd-storage/apps-data/jellyfin`
+Dataset: `ssd-storage/apps-data/jellyfin`
 
-##### Storage Configuration
+##### Installation setup
 
 WebUI Port: `30013`
 Jellyfin Config Storage:
@@ -177,11 +175,11 @@ Username: admin-jellyfin
 
 Media Library add
     Content type: `Mixed Movies and Shows`
-    Display name: `Movies`
+    Display name: `Movies and TV Shows`
     Folders: `/media/movie-series`
 
 Libraries:
-    Collection (Movies) -> Manage Library
+    Collection (Movies and TV Shows) -> Manage Library
         Subtitle Downloads, Download languages: Spanish; Latin, Spanish; Castilian, English
         Subtitle downloaders: Open Subtitles
 
@@ -199,7 +197,7 @@ Dashboard -> Scheduled tasks -> Download missing subtitles
 
 ##### gluetun app
 
-Dataset: `/ssd-storage/apps-data/gluetun`
+Dataset: `ssd-storage/apps-data/gluetun`
 
 Set new custom app with name `custom-app-gluetun`, paste the docker-compose setup below:
 
@@ -209,6 +207,7 @@ Set new custom app with name `custom-app-gluetun`, paste the docker-compose setu
 services:
   gluetun:
     image: qmcgaw/gluetun:v3.39.1 # https://hub.docker.com/r/qmcgaw/gluetun/tags
+    restart: on-failure:5
     container_name: custom-app-gluetun-1
     cap_add:
       - NET_ADMIN
@@ -232,17 +231,9 @@ services:
       - VPN_PORT_FORWARDING_PROVIDER=protonvpn
 ```
 
-App Config Storage:
-    Type of Storage: `Host Path`
-    Persistent Storage: `/mnt/ssd-storage/apps-data/qbittorrent`
-
-Additional App storage:
-    Type of Storage: `Host Path`
-    `/mnt/backup-and-downloads/movies-series` to `/media/downloads`
-
 ##### qBittorrent app
 
-Dataset: `/ssd-storage/apps-data/qbittorrent`
+Dataset: `ssd-storage/apps-data/qbittorrent`
 
 Set new custom app with name `custom-app-qbittorrent`, paste the docker-compose setup below:
 
@@ -253,6 +244,7 @@ name: qbittorrent
 services:
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:4.6.7 # https://gitlab.com/Linuxserver.io/docker-qbittorrent/container_registry/774438
+    restart: on-failure:5
     container_name: custom-app-qbittorrent-1
     environment:
       - PUID=568 # Linux User ID for user: apps
@@ -263,7 +255,6 @@ services:
     volumes:
       - /mnt/ssd-storage/apps-data/qbittorrent/config:/config   #Directory you want to save your qbit config files
       - /mnt/backup-and-downloads/movies-series:/media    #movies/series/music directory 
-    restart: unless-stopped
     network_mode: container:custom-app-gluetun-1 #this is what makes the app to connect to the VPN.
     # Note that all ports were moved to the gluetun app.
 ```
@@ -302,7 +293,7 @@ Enter to shell for qbittorrent container and check `curl https://ipleak.net/json
 
 #### ddns-updater
 
-Dataset: `/ssd-storage/apps-data/ddns-updater`
+Dataset: `ssd-storage/apps-data/ddns-updater`
 
 WebUI Port: `30007`
 Host path: /mnt/ssd-storage/apps-data/ddns-updater
@@ -317,7 +308,7 @@ Config
 
 #### Traefik reverse proxy setup
 
-Dataset: `/ssd-storage/apps-data/traefik`
+Dataset: `ssd-storage/apps-data/traefik`
 
 ##### Set certificates and config
 
@@ -329,22 +320,14 @@ touch mkdir /mnt/ssd-storage/apps-data/traefik/letsencrypt/
 chmod 600 /mnt/ssd-storage/apps-data/traefik/letsencrypt/
 ```
 
-Add configuration to file `traefik_dynamic.yml`
+Add configuration to file `/mnt/ssd-storage/apps-data/traefik/traefik_dynamic.yml`
 
 ```yaml
 http:
   routers:
     immich:
-      rule: "Host(`YOUR_PERSONAL_DOMAIN`) && PathPrefix(`/immich`)"
+      rule: "Host(`YOUR_PHOTOS_DOMAIN`) && PathPrefix(`/immich`)"
       service: immich-service
-      entryPoints:
-        - websecure
-      tls:
-        certResolver: myresolver
-
-    qbittorrent:
-      rule: "Host(`YOUR_PERSONAL_DOMAIN`) && PathPrefix(`/qbittorrent`)"
-      service: qbittorrent-service
       entryPoints:
         - websecure
       tls:
@@ -375,31 +358,27 @@ http:
     immich-service:
       loadBalancer:
         servers:
-          - url: "http://192.168.0.200:30053"
-
-    qbittorrent-service:
-      loadBalancer:
-        servers:
-          - url: "http://192.168.0.200:8080"
+          - url: "http://192.168.0.200:30041"
 ```
 
 ##### Traefik app
 
-Set new custom app with name `custom-app-qbittorrent` and paste the docker-compose
+Set new custom app with name `custom-app-traefik` and paste the docker-compose
 setup below:
 
 ```yaml
 name: traefik
 services:
   reverse-proxy:
-    image: traefik:v3.1
+    image: traefik:v3.2
+    restart: on-failure:5
     container_name: custom-app-traefik-1
     command:
       - "--log.level=DEBUG"
       - "--api.insecure=true" # Enable Traefik dashboard (optional)
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.websecure.address=:34000"
+      - "--entrypoints.websecure.address=:35000"
       - "--certificatesresolvers.myresolver.acme.email=letsencrypt@mail.desentropia.com" # Your email for Let's Encrypt notifications
       - "--certificatesresolvers.myresolver.acme.storage=/etc/traefik/letsencrypt/acme.json" # Storage for certificates
       - "--certificatesresolvers.myresolver.acme.dnschallenge=true"
@@ -412,7 +391,7 @@ services:
           - CF_DNS_API_TOKEN=YOUR_CLOUDFLARE_TOKEN
           - CF_API_EMAIL=YOUR_CLOUDFLARE_EMAIL
     ports:
-      - "33000:33000" # External port
+      - "35000:35000" # External port
       - "30033:8080"  # Traefik dashboard (optional)
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"  # Required for Docker provider
@@ -420,7 +399,8 @@ services:
 
  # Whoami Service
   whoami:
-    image: "traefik/whoami:v1.10"
+    image: "traefik/whoami:v1.10.3"
+    restart: on-failure:5
     container_name: "custom-app-traefik-whoami-service-1"
     labels:
       - "traefik.enable=true"
@@ -429,8 +409,75 @@ services:
       - "traefik.http.routers.whoami.tls.certResolver=myresolver"  # Enable TLS if you want to secure this route
 ```
 
+Port forwarding needs to be set in the router for port `35000` (or the port that
+you choose) to local NAS IP.
+
 #### Immich
 
-#### S3 backup
+Install from Applications (`community`)
+
+Datasets:
+
+* `ssd-storage/apps-data/immich`
+* `personal-media/media-self-hosted` (initially created)
+* `ssd-storage/apps-data/immich/pgData`
+* `ssd-storage/apps-data/immich/profile`
+* `ssd-storage/apps-data/immich/thumbs`
+* `ssd-storage/apps-data/immich/uploads`
+* `ssd-storage/apps-data/immich/video`
+* `backup-and-downloads/backups/backup-db-self-hosted`
+
+##### Installation setup
+
+Timezone: `'Europe/Berlin' timezone`
+Enable Machine Learning: **Checked**
+Machine Learning Image Type: `Default Machine Learning Image`
+Database Password: `THE_NEW_DB_PASSWORD`
+Redis Password: `THE_NEW_REDIS_PASSWORD`
+Log Level: `Log`
+WebUI Port: `30041`
+Immich Library Storage:
+    Type: `Host Path`
+    Host Path: `/mnt/personal-media/media-self-hosted`
+Immich Uploads Storage:
+    Type: `Host Path`
+    Host Path: `/mnt/ssd-storage/apps-data/immich/uploads`
+Immich Thumbs Storage:
+    Type: `Host Path`
+    Host Path: `/mnt/ssd-storage/apps-data/immich/thumbs`
+Immich Profile Storage:
+    Type: `Host Path`
+    Host Path: `/mnt/ssd-storage/apps-data/immich/profile`
+Immich Video Storage:
+    Type: `Host Path`
+    Host Path: `/mnt/ssd-storage/apps-data/immich/video`
+Immich Backups Storage:
+    Type: `Host Path`
+    Host Path: `/mnt/backup-and-downloads/backups/backup-db-self-hosted`
+Postgres Data Storage:
+    Type: `Host Path`
+    Host Path: `/mnt/ssd-storage/apps-data/immich/pgData`
+
+##### Web setup
+
+Enter to the WebUI and set the default username (email) and password for
+`admin` user.
+
+Server Settings:
+    External domain: `https://YOUR_PHOTOS_DOMAIN:35000`
+Storage Template:
+    Enable storage template engine: **Checked**
+    Template preset: `2022/2022-02-03/IMAGE_56437`
+
+### Data Protection
+
+* For quick errors: Set Periodic Snapshot Task for the datastore (enable **Recursive**
+if child datastores are in the datastore).
+
+* For physical damage: Set Replication Task for the datastore to backup datastore
+in another Pool store.
+
+* Physical damage and ransomware: Set TrueCloud Backup Task to Starj from backup
+datastore. Make the same for the Immich DB Backup datastore.
 
 #### Photography/Videography workflow
