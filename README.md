@@ -206,10 +206,11 @@ Set new custom app with name `custom-app-gluetun`, paste the docker-compose setu
 ```yaml
 # Source: https://forums.truenas.com/t/guide-how-to-install-qbittorrent-or-any-app-with-vpn-on-truenas-electric-eel/12677
 # Configuration https://github.com/qdm12/gluetun-wiki
+name: gluetun
 services:
   gluetun:
     image: qmcgaw/gluetun:v3.39.1 # https://hub.docker.com/r/qmcgaw/gluetun/tags
-    restart: on-failure:5
+    restart: always
     container_name: custom-app-gluetun-1
     cap_add:
       - NET_ADMIN
@@ -246,7 +247,7 @@ name: qbittorrent
 services:
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:4.6.7 # https://gitlab.com/Linuxserver.io/docker-qbittorrent/container_registry/774438
-    restart: on-failure:5
+    restart: always
     container_name: custom-app-qbittorrent-1
     environment:
       - PUID=568 # Linux User ID for user: apps
@@ -373,7 +374,7 @@ name: traefik
 services:
   reverse-proxy:
     image: traefik:v3.2
-    restart: on-failure:5
+    restart: always
     container_name: custom-app-traefik-1
     command:
       - "--log.level=DEBUG"
@@ -398,11 +399,10 @@ services:
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"  # Required for Docker provider
       - /mnt/ssd-storage/apps-data/traefik:/etc/traefik/
-
  # Whoami Service
   whoami:
     image: "traefik/whoami:v1.10.3"
-    restart: on-failure:5
+    restart: always
     container_name: "custom-app-traefik-whoami-service-1"
     labels:
       - "traefik.enable=true"
