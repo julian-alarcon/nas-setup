@@ -9,6 +9,8 @@ Create boot USB with `dd status=progress if=path/to/.iso of=path/to/USB`.
 
 ### Decrease pool for OS installation
 
+[Source](https://www.truenas.com/community/threads/howto-split-ssd-with-boot-pool-to-create-partition-for-data-no-usb-install-easy-config-migration.102641/)
+
 Before installing, select shell. Edit file `vi /usr/sbin/truenas-install` and change
 line
 
