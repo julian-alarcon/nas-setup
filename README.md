@@ -176,14 +176,41 @@ Passthrough available (non-NVIDIA) GPUs: `Checked`
 Username: admin-jellyfin
 
 Media Library add
-    Content type: `Mixed Movies and Shows`
-    Display name: `Movies and TV Shows`
-    Folders: `/media/movie-series`
+  Content type: `Mixed Movies and Shows`
+  Display name: `Movies and TV Shows`
+  Folders: `/media/movie-series`
 
 Libraries:
-    Collection (Movies and TV Shows) -> Manage Library
-        Subtitle Downloads, Download languages: Spanish; Latin, Spanish; Castilian, English
-        Subtitle downloaders: Open Subtitles
+  Collection (Movies and TV Shows) -> Manage Library
+    Subtitle Downloads, Download languages: Spanish; Latin, Spanish; Castilian, English
+    Subtitle downloaders: Open Subtitles
+
+Playback:
+  Transcoding:
+    Hardware acceleration: Intel QuickSync (QSV) (This value depends on the GPU available)
+    VA-API Device: /dev/dri/renderD128 (can be obtained from `ls -l /dev/dri`)
+    Enable hardware decoding for: (Can be obtained from `/usr/lib/jellyfin-ffmpeg/vainfo --display drm --device /dev/dri/renderD128`)
+      * H264: checked
+      * HEVC: checked
+      * MPEG2: checked
+      * VC1: checked
+      * VP8: checked
+      * VP9: checked
+      * AV1: checked
+      * HEVC 10bit: checked
+      * VP9 10bit: checked
+      * HEVC RExt 8/10bit: checked
+      * HEVC RExt 12bit: checked
+      * Prefer OS native DXVA or VA-API hardware decoders: checked
+    Hardware encoding options:
+      * Enable hardware encoding: checked
+      * Enable Intel Low-Power H.264 hardware encoder: checked
+      * Enable Intel Low-Power HEVC hardware encoder: checked
+    Encoding format options:
+      * Allow encoding in HEVC format: checked
+      * Enable VPP Tone mapping: checked
+
+> Review of GPU usage can be made in TrueNAS shell with the command `sudo intel_gpu_top`
 
 ##### Plugins setup
 
@@ -209,7 +236,7 @@ Set new custom app with name `custom-app-gluetun`, paste the docker-compose setu
 name: gluetun
 services:
   gluetun:
-    image: qmcgaw/gluetun:v3.39.1 # https://hub.docker.com/r/qmcgaw/gluetun/tags
+    image: qmcgaw/gluetun:v3.40.0 # https://hub.docker.com/r/qmcgaw/gluetun/tags
     restart: always
     container_name: custom-app-gluetun-1
     cap_add:
@@ -232,6 +259,7 @@ services:
       - UPDATER_PERIOD=24h
       - VPN_PORT_FORWARDING=on
       - VPN_PORT_FORWARDING_PROVIDER=protonvpn
+      - FIREWALL_VPN_INPUT_PORTS=6881
 ```
 
 ##### qBittorrent app
@@ -373,7 +401,7 @@ setup below:
 name: traefik
 services:
   reverse-proxy:
-    image: traefik:v3.2
+    image: traefik:v3.2.3
     restart: always
     container_name: custom-app-traefik-1
     command:
@@ -391,8 +419,8 @@ services:
       - "--certificatesresolvers.myresolver.acme.caserver=https://acme-v02.api.letsencrypt.org/directory" # Use Let's Encrypt production
       - "--providers.file.filename=/etc/traefik/traefik_dynamic.yml"  # Use the dynamic config
     environment:
-          - CF_DNS_API_TOKEN=YOUR_CLOUDFLARE_TOKEN
-          - CF_API_EMAIL=YOUR_CLOUDFLARE_EMAIL
+      - CF_DNS_API_TOKEN=YOUR_CLOUDFLARE_TOKEN
+      - CF_API_EMAIL=YOUR_CLOUDFLARE_EMAIL
     ports:
       - "35000:35000" # External port
       - "30033:8080"  # Traefik dashboard (optional)
