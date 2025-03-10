@@ -274,7 +274,7 @@ Set new custom app with name `custom-app-qbittorrent`, paste the docker-compose 
 name: qbittorrent
 services:
   qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:4.6.7 # https://gitlab.com/Linuxserver.io/docker-qbittorrent/container_registry/774438
+    image: lscr.io/linuxserver/qbittorrent:5.0.4 # https://gitlab.com/Linuxserver.io/docker-qbittorrent/container_registry/774438
     restart: always
     container_name: custom-app-qbittorrent-1
     environment:
@@ -309,14 +309,15 @@ Options:
 * Connection -> Global maximum number of upload slots: unchecked
 * Connection -> Maximum number of upload slots per torrent: unchecked
 * BitTorrent -> Torrent Queueing
-    Maximum active downloads: 10
-    Maximum active uploads: 3
-    Maximum active torrents: 15
+    * Maximum active downloads: 10
+    * Maximum active uploads: 3
+    * Maximum active torrents: 15
 * BitTorrent -> When total seeding time reaches: 60 minutes
                 When inactive seeding time reaches: 120 minutes
                     then: Pause torrent
 
 * Search tab -> Search plugins... -> Check for updates
+    * [Install plugins](https://github.com/qbittorrent/search-plugins/wiki/unofficial-search-plugins)
 
 ###### Test VPN connection on qBittorrent
 
@@ -401,7 +402,7 @@ setup below:
 name: traefik
 services:
   reverse-proxy:
-    image: traefik:v3.2.3
+    image: traefik:v3.3.4 # https://github.com/traefik/traefik/releases
     restart: always
     container_name: custom-app-traefik-1
     command:
@@ -425,13 +426,13 @@ services:
       - "35000:35000" # External port
       - "30033:8080"  # Traefik dashboard (optional)
     volumes:
-      - "/var/run/docker.sock:/var/run/docker.sock"  # Required for Docker provider
+      - /var/run/docker.sock:/var/run/docker.sock  # Required for Docker provider
       - /mnt/ssd-storage/apps-data/traefik:/etc/traefik/
  # Whoami Service
   whoami:
-    image: "traefik/whoami:v1.10.3"
-    restart: always
-    container_name: "custom-app-traefik-whoami-service-1"
+    image: traefik/whoami:v1.10.4 # https://github.com/traefik/whoami/releases
+    restart: on-failure:5
+    container_name: custom-app-traefik-whoami-service-1
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.whoami.rule=Host(`YOUR_PERSONAL_DOMAIN`)"  # Change to your desired host
