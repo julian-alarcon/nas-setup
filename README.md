@@ -266,7 +266,8 @@ services:
 
 Dataset: `ssd-storage/apps-data/qbittorrent`
 
-Set new custom app with name `custom-app-qbittorrent`, paste the docker-compose setup below:
+Set new custom app with name `custom-app-qbittorrent`, paste the docker-compose
+setup below:
 
 ```yaml
 # Source: https://forums.truenas.com/t/guide-how-to-install-qbittorrent-or-any-app-with-vpn-on-truenas-electric-eel/12677
@@ -274,7 +275,7 @@ Set new custom app with name `custom-app-qbittorrent`, paste the docker-compose 
 name: qbittorrent
 services:
   qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:5.0.4 # https://gitlab.com/Linuxserver.io/docker-qbittorrent/container_registry/774438
+    image: lscr.io/linuxserver/qbittorrent:5.1.2 # https://gitlab.com/Linuxserver.io/docker-qbittorrent/container_registry/774438
     restart: always
     container_name: custom-app-qbittorrent-1
     environment:
@@ -324,6 +325,8 @@ Options:
 Enter to shell for qbittorrent container and check `curl https://ipleak.net/json/`
 
 #### ddns-updater
+
+Install from Applications (`community`)
 
 Dataset: `ssd-storage/apps-data/ddns-updater`
 
@@ -385,12 +388,12 @@ http:
     jellyfin-service:
       loadBalancer:
         servers:
-          - url: "http://192.168.0.200:30013"
+          - url: "http://192.168.1.200:30013"
 
     immich-service:
       loadBalancer:
         servers:
-          - url: "http://192.168.0.200:30041"
+          - url: "http://192.168.1.200:30041"
 ```
 
 ##### Traefik app
@@ -402,7 +405,7 @@ setup below:
 name: traefik
 services:
   reverse-proxy:
-    image: traefik:v3.3.4 # https://github.com/traefik/traefik/releases
+    image: traefik:v3.3.6 # https://github.com/traefik/traefik/releases
     restart: always
     container_name: custom-app-traefik-1
     command:
@@ -430,7 +433,7 @@ services:
       - /mnt/ssd-storage/apps-data/traefik:/etc/traefik/
  # Whoami Service
   whoami:
-    image: traefik/whoami:v1.10.4 # https://github.com/traefik/whoami/releases
+    image: traefik/whoami:v1.11.0 # https://github.com/traefik/whoami/releases
     restart: on-failure:5
     container_name: custom-app-traefik-whoami-service-1
     labels:
@@ -450,13 +453,14 @@ Install from Applications (`community`)
 Datasets:
 
 * `ssd-storage/apps-data/immich`
-* `personal-media/media-self-hosted` (initially created)
-* `ssd-storage/apps-data/immich/pgData`
-* `ssd-storage/apps-data/immich/profile`
-* `ssd-storage/apps-data/immich/thumbs`
-* `ssd-storage/apps-data/immich/uploads`
-* `ssd-storage/apps-data/immich/video`
-* `backup-and-downloads/backups/backup-db-self-hosted`
+* `personal-media/immich`
+
+Create directories
+
+```sh
+mkdir -p /mnt/tank/immich/data/{upload,thumbs,library,profile,backups,encoded-video}
+mkdir -p /mnt/ssd-storage/apps-data/immich/pgData
+```
 
 ##### Installation setup
 
@@ -467,24 +471,9 @@ Database Password: `THE_NEW_DB_PASSWORD`
 Redis Password: `THE_NEW_REDIS_PASSWORD`
 Log Level: `Log`
 WebUI Port: `30041`
-Immich Library Storage:
+ Data Storage (aka Upload Location):
     Type: `Host Path`
-    Host Path: `/mnt/personal-media/media-self-hosted`
-Immich Uploads Storage:
-    Type: `Host Path`
-    Host Path: `/mnt/ssd-storage/apps-data/immich/uploads`
-Immich Thumbs Storage:
-    Type: `Host Path`
-    Host Path: `/mnt/ssd-storage/apps-data/immich/thumbs`
-Immich Profile Storage:
-    Type: `Host Path`
-    Host Path: `/mnt/ssd-storage/apps-data/immich/profile`
-Immich Video Storage:
-    Type: `Host Path`
-    Host Path: `/mnt/ssd-storage/apps-data/immich/video`
-Immich Backups Storage:
-    Type: `Host Path`
-    Host Path: `/mnt/backup-and-downloads/backups/backup-db-self-hosted`
+    Host Path: `/mnt/personal-media/immich/data`
 Postgres Data Storage:
     Type: `Host Path`
     Host Path: `/mnt/ssd-storage/apps-data/immich/pgData`
