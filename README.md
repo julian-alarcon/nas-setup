@@ -236,7 +236,7 @@ Set new custom app with name `custom-app-gluetun`, paste the docker-compose setu
 name: gluetun
 services:
   gluetun:
-    image: qmcgaw/gluetun:v3.40.0 # https://hub.docker.com/r/qmcgaw/gluetun/tags
+    image: qmcgaw/gluetun:v3 # https://hub.docker.com/r/qmcgaw/gluetun/tags
     restart: always
     container_name: custom-app-gluetun-1
     cap_add:
@@ -275,7 +275,7 @@ setup below:
 name: qbittorrent
 services:
   qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:5.1.2 # https://gitlab.com/Linuxserver.io/docker-qbittorrent/container_registry/774438
+    image: lscr.io/linuxserver/qbittorrent:5.1.4 # https://gitlab.com/Linuxserver.io/docker-qbittorrent/container_registry/774438
     restart: always
     container_name: custom-app-qbittorrent-1
     environment:
@@ -405,7 +405,7 @@ setup below:
 name: traefik
 services:
   reverse-proxy:
-    image: traefik:v3.3.6 # https://github.com/traefik/traefik/releases
+    image: traefik:v3 # https://github.com/traefik/traefik/releases
     restart: always
     container_name: custom-app-traefik-1
     command:
@@ -433,7 +433,7 @@ services:
       - /mnt/ssd-storage/apps-data/traefik:/etc/traefik/
  # Whoami Service
   whoami:
-    image: traefik/whoami:v1.11.0 # https://github.com/traefik/whoami/releases
+    image: traefik/whoami:v1.11 # https://github.com/traefik/whoami/releases
     restart: on-failure:5
     container_name: custom-app-traefik-whoami-service-1
     labels:
