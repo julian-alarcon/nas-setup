@@ -214,9 +214,9 @@ Playback:
 
 ##### Plugins setup
 
-Install Opensubtitles
-
 * Opensubtitles: Username, password, API
+
+* AniDB
 
 ##### Settings
 
