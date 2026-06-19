@@ -62,9 +62,27 @@ systemctl start fancontrol
 2. Setup password
 3. Select name: `nas-hostname`
 4. Setup IP
-    * IP: `192.168.0.99/24`
-    * Gateway: `192.168/0/1`
-    * Nameservers: `1.1.1.1, 8.8.8.8, 192.168.0.1`
+   - IP: `192.168.1.200/24`
+   - Gateway: `192.168/0/1`
+   - Nameservers: `1.1.1.1, 8.8.8.8, 192.168.0.1`
+
+### User setup
+
+Credentials > Users
+User: admin
+Email: `<my-personal-email>@<mydomain.com>`
+
+### Email Options
+
+SMTP: `Checked`
+From Email: `<my-nas-email>@<mydomain.com>`
+From Name: `<NAME> TrueNAS`
+Outgoing Mail Server: `my-smtp-server`
+Mail Server Port: `587`
+Security: `TLS (STARTTLS)`
+SMTP Authentication: `Checked`
+Username: `<username-for-smtp>`
+Password: `<password-for-smtp>`
 
 ### Disk setup for VMs/Containers
 
@@ -153,22 +171,24 @@ Select as Dataset Preset `Apps`
 
 Install from Applications (`community`)
 
-Dataset: `ssd-storage/apps-data/jellyfin`
+Dataset:
+
+- `ssd-storage/apps-data/jellyfin`
 
 ##### Installation setup
 
 WebUI Port: `30013`
 Jellyfin Config Storage:
-    Type: `Host Path`
-    Host Path: `/mnt/ssd-storage/apps-data/jellyfin`
+Type: `Host Path`
+Host Path: `/mnt/ssd-storage/apps-data/jellyfin`
 Jellyfin Cache Storage:
-    Type: `ixVolume`
+Type: `ixVolume`
 Jellyfin Transcode Storage:
-    Type: `tmpfs`
+Type: `tmpfs`
 Additional Storage:
-    Type: `Host Path`
-    Mount path: `/media/movies-series`
-    Host path: `/mnt/backup-and-downloads/movies-series`
+Type: `Host Path`
+Mount path: `/media/movies-series`
+Host path: `/mnt/backup-and-downloads/movies-series`
 Passthrough available (non-NVIDIA) GPUs: `Checked`
 
 ##### Web setup
@@ -176,47 +196,46 @@ Passthrough available (non-NVIDIA) GPUs: `Checked`
 Username: admin-jellyfin
 
 Media Library add
-  Content type: `Mixed Movies and Shows`
-  Display name: `Movies and TV Shows`
-  Folders: `/media/movie-series`
+Content type: `Mixed Movies and Shows`
+Display name: `Movies and TV Shows`
+Folders: `/media/movie-series`
 
 Libraries:
-  Collection (Movies and TV Shows) -> Manage Library
-    Subtitle Downloads, Download languages: Spanish; Latin, Spanish; Castilian, English
-    Subtitle downloaders: Open Subtitles
+Collection (Movies and TV Shows) -> Manage Library
+Subtitle Downloads, Download languages: Spanish; Latin, Spanish; Castilian, English
+Subtitle downloaders: Open Subtitles
 
 Playback:
-  Transcoding:
-    Hardware acceleration: Intel QuickSync (QSV) (This value depends on the GPU available)
-    VA-API Device: /dev/dri/renderD128 (can be obtained from `ls -l /dev/dri`)
-    Enable hardware decoding for: (Can be obtained from `/usr/lib/jellyfin-ffmpeg/vainfo --display drm --device /dev/dri/renderD128`)
-      * H264: checked
-      * HEVC: checked
-      * MPEG2: checked
-      * VC1: checked
-      * VP8: checked
-      * VP9: checked
-      * AV1: checked
-      * HEVC 10bit: checked
-      * VP9 10bit: checked
-      * HEVC RExt 8/10bit: checked
-      * HEVC RExt 12bit: checked
-      * Prefer OS native DXVA or VA-API hardware decoders: checked
-    Hardware encoding options:
-      * Enable hardware encoding: checked
-      * Enable Intel Low-Power H.264 hardware encoder: checked
-      * Enable Intel Low-Power HEVC hardware encoder: checked
-    Encoding format options:
-      * Allow encoding in HEVC format: checked
-      * Enable VPP Tone mapping: checked
+Transcoding:
+Hardware acceleration: Intel QuickSync (QSV) (This value depends on the GPU available)
+VA-API Device: /dev/dri/renderD128 (can be obtained from `ls -l /dev/dri`)
+Enable hardware decoding for: (Can be obtained from `/usr/lib/jellyfin-ffmpeg/vainfo --display drm --device /dev/dri/renderD128`)
+_ H264: checked
+_ HEVC: checked
+_ MPEG2: checked
+_ VC1: checked
+_ VP8: checked
+_ VP9: checked
+_ AV1: checked
+_ HEVC 10bit: checked
+_ VP9 10bit: checked
+_ HEVC RExt 8/10bit: checked
+_ HEVC RExt 12bit: checked
+_ Prefer OS native DXVA or VA-API hardware decoders: checked
+Hardware encoding options:
+_ Enable hardware encoding: checked
+_ Enable Intel Low-Power H.264 hardware encoder: checked
+_ Enable Intel Low-Power HEVC hardware encoder: checked
+Encoding format options:
+_ Allow encoding in HEVC format: checked \* Enable VPP Tone mapping: checked
 
 > Review of GPU usage can be made in TrueNAS shell with the command `sudo intel_gpu_top`
 
 ##### Plugins setup
 
-* Opensubtitles: Username, password, API
+- Opensubtitles: Username, password, API
 
-* AniDB
+- AniDB
 
 ##### Settings
 
@@ -264,7 +283,9 @@ services:
 
 ##### qBittorrent app
 
-Dataset: `ssd-storage/apps-data/qbittorrent`
+Dataset:
+
+- `ssd-storage/apps-data/qbittorrent`
 
 Set new custom app with name `custom-app-qbittorrent`, paste the docker-compose
 setup below:
@@ -275,7 +296,7 @@ setup below:
 name: qbittorrent
 services:
   qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:5.1.4 # https://gitlab.com/Linuxserver.io/docker-qbittorrent/container_registry/774438
+    image: lscr.io/linuxserver/qbittorrent:5.2.1 # https://gitlab.com/Linuxserver.io/docker-qbittorrent/container_registry/774438
     restart: always
     container_name: custom-app-qbittorrent-1
     environment:
@@ -285,8 +306,8 @@ services:
       - WEBUI_PORT=8080
       - TORRENTING_PORT=6881
     volumes:
-      - /mnt/ssd-storage/apps-data/qbittorrent/config:/config   #Directory you want to save your qbit config files
-      - /mnt/backup-and-downloads/movies-series:/media    #movies/series/music directory 
+      - /mnt/ssd-storage/apps-data/qbittorrent/config:/config #Directory you want to save your qbit config files
+      - /mnt/backup-and-downloads/movies-series:/media #movies/series/music directory
     network_mode: container:custom-app-gluetun-1 #this is what makes the app to connect to the VPN.
     # Note that all ports were moved to the gluetun app.
 ```
@@ -295,30 +316,30 @@ services:
 
 Options:
 
-* Web UI -> Authentication -> Password: New Password
-* Web UI -> Authentication -> By pass authentication for clients on localhost
-* Web UI -> Authentication -> By pass authentication for clients in whitelisted IP subnets: 192.168.0.0/24
-* Advanced -> Network interface: tun0
-* Optional IP address to bind to: All IPv4 address
-* Downloads ->   Default Save Path: `/media`
-* Downloads -> Keep incomplete torrents in: `/media/downloads/torrents/incomplete`
-* Downloads -> Copy .torrent files to: `/media/downloads/torrents`
-* Downloads -> Copy .torrent files for finished downloads to: `/media/downloads/torrents`
-* Connection -> Port used for incoming connections: 6881 (Not needed to modify as network is using glutun)
-* Connection -> Global maximum number of connections: unchecked
-* Connection -> Maximum number of connections per torrent: unchecked
-* Connection -> Global maximum number of upload slots: unchecked
-* Connection -> Maximum number of upload slots per torrent: unchecked
-* BitTorrent -> Torrent Queueing
-    * Maximum active downloads: 10
-    * Maximum active uploads: 3
-    * Maximum active torrents: 15
-* BitTorrent -> When total seeding time reaches: 60 minutes
-                When inactive seeding time reaches: 120 minutes
-                    then: Pause torrent
+- Web UI -> Authentication -> Password: New Password
+- Web UI -> Authentication -> By pass authentication for clients on localhost
+- Web UI -> Authentication -> By pass authentication for clients in whitelisted IP subnets: 192.168.0.0/24
+- Advanced -> Network interface: tun0
+- Optional IP address to bind to: All IPv4 address
+- Downloads -> Default Save Path: `/media`
+- Downloads -> Keep incomplete torrents in: `/media/downloads/torrents/incomplete`
+- Downloads -> Copy .torrent files to: `/media/downloads/torrents`
+- Downloads -> Copy .torrent files for finished downloads to: `/media/downloads/torrents`
+- Connection -> Port used for incoming connections: 6881 (Not needed to modify as network is using glutun)
+- Connection -> Global maximum number of connections: unchecked
+- Connection -> Maximum number of connections per torrent: unchecked
+- Connection -> Global maximum number of upload slots: unchecked
+- Connection -> Maximum number of upload slots per torrent: unchecked
+- BitTorrent -> Torrent Queueing
+  - Maximum active downloads: 10
+  - Maximum active uploads: 3
+  - Maximum active torrents: 15
+- BitTorrent -> When total seeding time reaches: 60 minutes
+  When inactive seeding time reaches: 120 minutes
+  then: Pause torrent
 
-* Search tab -> Search plugins... -> Check for updates
-    * [Install plugins](https://github.com/qbittorrent/search-plugins/wiki/unofficial-search-plugins)
+- Search tab -> Search plugins... -> Check for updates
+  - [Install plugins](https://github.com/qbittorrent/search-plugins/wiki/unofficial-search-plugins)
 
 ###### Test VPN connection on qBittorrent
 
@@ -328,22 +349,29 @@ Enter to shell for qbittorrent container and check `curl https://ipleak.net/json
 
 Install from Applications (`community`)
 
-Dataset: `ssd-storage/apps-data/ddns-updater`
+Dataset:
+
+- `ssd-storage/apps-data/ddns-updater`
 
 WebUI Port: `30007`
 Host path: /mnt/ssd-storage/apps-data/ddns-updater
-Public IP DNS Providers
-    Provider: Cloudflare
-Config
-    Cloudflare
-        Domain: YOUR_PERSONAL_DOMAIN
-        IP Version: IPV4 and IPV6
-        Zone ID: From Cloudflare dashboard DNS section
-        Token: YOUR_CLOUDFLARE_TOKEN
+
+##### DNS provider prerequisites
+
+1. Create an `A` record for the subdomain pointing at any placeholder IP (the
+   updater overwrites it on first run). Disable any CDN proxying so Traefik can
+   complete the Let's Encrypt challenge and reach the origin.
+2. Get the zone ID and create a DNS-edit API token scoped to that zone.
+
+##### App config
+
+Set the provider, domain, IP version, zone ID, and API token from the steps above.
 
 #### Traefik reverse proxy setup
 
-Dataset: `ssd-storage/apps-data/traefik`
+Dataset:
+
+- `ssd-storage/apps-data/traefik`
 
 ##### Set certificates and config
 
@@ -378,6 +406,14 @@ http:
       middlewares:
         - strip-jellyfin-prefix
 
+    dothesplit:
+      rule: "Host(`YOUR_PERSONAL_DOMAIN`)"
+      service: dothesplit-service
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: myresolver
+
   middlewares:
     strip-jellyfin-prefix:
       stripPrefix:
@@ -394,6 +430,11 @@ http:
       loadBalancer:
         servers:
           - url: "http://192.168.1.200:30041"
+
+    dothesplit-service:
+      loadBalancer:
+        servers:
+          - url: "http://192.168.1.200:30051"
 ```
 
 ##### Traefik app
@@ -417,30 +458,29 @@ services:
       - "--certificatesresolvers.myresolver.acme.email=letsencrypt@mail.desentropia.com" # Your email for Let's Encrypt notifications
       - "--certificatesresolvers.myresolver.acme.storage=/etc/traefik/letsencrypt/acme.json" # Storage for certificates
       - "--certificatesresolvers.myresolver.acme.dnschallenge=true"
-      - "--certificatesresolvers.myresolver.acme.dnschallenge.provider=cloudflare" # Set DNS provider to Cloudflare
+      - "--certificatesresolvers.myresolver.acme.dnschallenge.provider=YOUR_DNS_PROVIDER"
       - "--certificatesresolvers.myresolver.acme.dnschallenge.resolvers=1.1.1.1:53,8.8.8.8:53"
       # - "--certificatesresolvers.myresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory" # Use Let's Encrypt staging server
       - "--certificatesresolvers.myresolver.acme.caserver=https://acme-v02.api.letsencrypt.org/directory" # Use Let's Encrypt production
-      - "--providers.file.filename=/etc/traefik/traefik_dynamic.yml"  # Use the dynamic config
+      - "--providers.file.filename=/etc/traefik/traefik_dynamic.yml" # Use the dynamic config
     environment:
-      - CF_DNS_API_TOKEN=YOUR_CLOUDFLARE_TOKEN
-      - CF_API_EMAIL=YOUR_CLOUDFLARE_EMAIL
+      - DNS_API_TOKEN=YOUR_DNS_API_TOKEN # Use the env vars your DNS provider expects
     ports:
       - "35000:35000" # External port
-      - "30033:8080"  # Traefik dashboard (optional)
+      - "30033:8080" # Traefik dashboard (optional)
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock  # Required for Docker provider
+      - /var/run/docker.sock:/var/run/docker.sock # Required for Docker provider
       - /mnt/ssd-storage/apps-data/traefik:/etc/traefik/
- # Whoami Service
+  # Whoami Service
   whoami:
     image: traefik/whoami:v1.11 # https://github.com/traefik/whoami/releases
     restart: on-failure:5
     container_name: custom-app-traefik-whoami-service-1
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.whoami.rule=Host(`YOUR_PERSONAL_DOMAIN`)"  # Change to your desired host
-      - "traefik.http.routers.whoami.entrypoints=websecure"  # Use websecure for HTTPS
-      - "traefik.http.routers.whoami.tls.certResolver=myresolver"  # Enable TLS if you want to secure this route
+      - "traefik.http.routers.whoami.rule=Host(`YOUR_PERSONAL_DOMAIN`)" # Change to your desired host
+      - "traefik.http.routers.whoami.entrypoints=websecure" # Use websecure for HTTPS
+      - "traefik.http.routers.whoami.tls.certResolver=myresolver" # Enable TLS if you want to secure this route
 ```
 
 Port forwarding needs to be set in the router for port `35000` (or the port that
@@ -452,13 +492,13 @@ Install from Applications (`community`)
 
 Datasets:
 
-* `ssd-storage/apps-data/immich`
-* `personal-media/immich`
+- `ssd-storage/apps-data/immich`
+- `personal-media/immich`
 
 Create directories
 
 ```sh
-mkdir -p /mnt/tank/immich/data/{upload,thumbs,library,profile,backups,encoded-video}
+mkdir -p /mnt/personal-media/immich/data/{upload,thumbs,library,profile,backups,encoded-video}
 mkdir -p /mnt/ssd-storage/apps-data/immich/pgData
 ```
 
@@ -471,12 +511,12 @@ Database Password: `THE_NEW_DB_PASSWORD`
 Redis Password: `THE_NEW_REDIS_PASSWORD`
 Log Level: `Log`
 WebUI Port: `30041`
- Data Storage (aka Upload Location):
-    Type: `Host Path`
-    Host Path: `/mnt/personal-media/immich/data`
+Data Storage (aka Upload Location):
+Type: `Host Path`
+Host Path: `/mnt/personal-media/immich/data`
 Postgres Data Storage:
-    Type: `Host Path`
-    Host Path: `/mnt/ssd-storage/apps-data/immich/pgData`
+Type: `Host Path`
+Host Path: `/mnt/ssd-storage/apps-data/immich/pgData`
 
 ##### Web setup
 
@@ -484,20 +524,264 @@ Enter to the WebUI and set the default username (email) and password for
 `admin` user.
 
 Server Settings:
-    External domain: `https://YOUR_PHOTOS_DOMAIN:35000`
+External domain: `https://YOUR_PHOTOS_DOMAIN:35000`
 Storage Template:
-    Enable storage template engine: **Checked**
-    Template preset: `2022/2022-02-03/IMAGE_56437`
+Enable storage template engine: **Checked**
+Template preset: `2022/2022-02-03/IMAGE_56437`
+Notification Settings > Email:
+Host: `my-smtp-server`
+Port: `587`
+Username: `<username-for-smtp>`
+Password: `<password-for-smtp>`
+From address: `<immich@>`
+
+#### DoTheSplit
+
+[https://github.com/julian-alarcon/DoTheSplit/](https://github.com/julian-alarcon/DoTheSplit/)
+
+Expense-sharing app. Custom App published through Traefik at
+`https://YOUR_PERSONAL_DOMAIN:35000/`. Full walkthrough in the project's
+`INSTALL.md`; below is the NAS-specific summary.
+
+Datasets:
+
+- `ssd-storage/apps-data/dothesplit`
+
+##### Pre-create host directories
+
+The wizard cannot create directories on save, so create them from the shell:
+
+```sh
+mkdir -p /mnt/ssd-storage/apps-data/dothesplit/pgdata
+mkdir -p /mnt/ssd-storage/apps-data/dothesplit/migrations
+chown -R 70:70 /mnt/ssd-storage/apps-data/dothesplit/pgdata
+chmod 700      /mnt/ssd-storage/apps-data/dothesplit/pgdata
+```
+
+Create `pgdata` and `migrations` as **plain directories**, not ZFS datasets, a
+dataset mountpoint can't be `rm`'d and gets pinned busy on any deploy hiccup.
+
+UID `70` is the `postgres` user inside the **`-alpine`** Postgres image pinned
+below (`postgres:18.3-alpine3.22`). The Debian-based `postgres:18` image instead
+runs as UID `999`, so if you ever switch off the alpine tag, re-`chown` `pgdata`
+to `999:999`. Either way, do **not** apply the dataset `Apps` permission preset
+(UID 568) to `pgdata` or Postgres refuses to start.
+
+##### Drop the migrations on disk
+
+The `migrate` one-shot reads SQL from a host path. Fetch the migrations matching
+the release tag you install (replace `v1.0.0`):
+
+```sh
+cd /mnt/ssd-storage/apps-data/dothesplit/migrations
+curl -fsSL https://github.com/julian-alarcon/dothesplit/archive/refs/tags/v1.0.0.tar.gz \
+  | tar -xz --strip-components=3 --wildcards '*/api/migrations'
+ls   # should list 0001_*.up.sql, 0001_*.down.sql, …
+```
+
+Refresh this directory to the new tag artifacts before bumping image versions on
+upgrades.
+
+##### Generate the four secrets
+
+Run once and store the output in a password manager **before** continuing.
+Losing `EMAIL_ENC_KEY`, `EMAIL_HMAC_KEY`, or `PASSWORD_PEPPER` after the database
+has data makes that data unrecoverable.
+
+```sh
+echo "EMAIL_ENC_KEY=$(openssl rand -base64 32)"
+echo "EMAIL_HMAC_KEY=$(openssl rand -base64 32)"
+echo "PASSWORD_PEPPER=$(openssl rand -base64 32)"
+echo "POSTGRES_PASSWORD=$(openssl rand -base64 24)"
+```
+
+Build `DATABASE_URL` from the Postgres password (URL-encode it if it contains
+any of `: / ? # [ ] @`):
+
+```
+postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable
+```
+
+##### Install the Custom App
+
+1. **Apps -> Discover Apps -> Custom App**.
+2. **Application Name**: `dothesplit`.
+3. **Install via custom YAML**: paste the compose below. `COOKIE_SECURE` is
+   `true` and `WEB_ORIGIN` points at the public HTTPS URL because Traefik
+   terminates TLS in front of the web container. Substitute your release tag for
+   `1.0.0`. GHCR image tags carry **no** `v` prefix (`dothesplit-api:1.0.0`),
+   unlike the git tag and `curl | tar` URL above (`v1.0.0`), don't conflate them:
+
+   ```yaml
+   services:
+     postgres:
+       image: postgres:18.4-alpine3.22
+       restart: unless-stopped
+       environment:
+         POSTGRES_USER: dts
+         POSTGRES_PASSWORD: "<POSTGRES_PASSWORD>"
+         POSTGRES_DB: dts
+       volumes:
+         - /mnt/ssd-storage/apps-data/dothesplit/pgdata:/var/lib/postgresql
+       healthcheck:
+         test: ["CMD-SHELL", "pg_isready -U dts -d dts"]
+         interval: 5s
+         timeout: 3s
+         retries: 10
+       cap_drop: [ALL]
+       cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
+       security_opt: ["no-new-privileges:true"]
+       mem_limit: 512m
+       pids_limit: 200
+
+     migrate:
+       image: migrate/migrate:v4.19.1
+       depends_on:
+         postgres:
+           condition: service_healthy
+       volumes:
+         - /mnt/ssd-storage/apps-data/dothesplit/migrations:/migrations:ro
+       environment:
+         DATABASE_URL: "postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable"
+       entrypoint: ["/bin/sh", "-c"]
+       command:
+         - 'exec migrate -path /migrations -database "$$DATABASE_URL" up'
+       restart: "no"
+       read_only: true
+       cap_drop: [ALL]
+       security_opt: ["no-new-privileges:true"]
+       tmpfs:
+         - /tmp:rw,noexec,nosuid,size=8m
+
+     api:
+       image: ghcr.io/julian-alarcon/dothesplit-api:1.0.0
+       depends_on:
+         postgres:
+           condition: service_healthy
+         migrate:
+           condition: service_completed_successfully
+       environment:
+         DATABASE_URL: "postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable"
+         API_HTTP_ADDR: ":8080"
+         WEB_ORIGIN: "https://YOUR_PERSONAL_DOMAIN:35000"
+         COOKIE_SECURE: "true"
+         EMAIL_ENC_KEY: "<EMAIL_ENC_KEY>"
+         EMAIL_HMAC_KEY: "<EMAIL_HMAC_KEY>"
+         PASSWORD_PEPPER: "<PASSWORD_PEPPER>"
+         TRUSTED_PROXIES: "192.168.1.200/32"
+         LOG_LEVEL: info
+       restart: unless-stopped
+       healthcheck:
+         test: ["CMD", "/api", "--healthcheck"]
+         interval: 10s
+         timeout: 3s
+         retries: 5
+         start_period: 10s
+       read_only: true
+       cap_drop: [ALL]
+       security_opt: ["no-new-privileges:true"]
+       tmpfs:
+         - /tmp:rw,noexec,nosuid,size=32m
+
+     worker:
+       image: ghcr.io/julian-alarcon/dothesplit-api:1.0.0
+       depends_on:
+         postgres:
+           condition: service_healthy
+         migrate:
+           condition: service_completed_successfully
+       entrypoint: ["/worker"]
+       environment:
+         DATABASE_URL: "postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable"
+         EMAIL_ENC_KEY: "<EMAIL_ENC_KEY>"
+         EMAIL_HMAC_KEY: "<EMAIL_HMAC_KEY>"
+         PASSWORD_PEPPER: "<PASSWORD_PEPPER>"
+         LOG_LEVEL: info
+       restart: unless-stopped
+       read_only: true
+       cap_drop: [ALL]
+       security_opt: ["no-new-privileges:true"]
+       tmpfs:
+         - /tmp:rw,noexec,nosuid,size=32m
+
+     web:
+       image: ghcr.io/julian-alarcon/dothesplit-web:1.0.0
+       depends_on:
+         - api
+       environment:
+         API_BASE_URL_INTERNAL: http://api:8080
+         PUBLIC_API_BASE_URL: "https://YOUR_PERSONAL_DOMAIN:35000"
+         HOST: "0.0.0.0"
+         PORT: "3000"
+       ports:
+         - "30051:3000"
+       restart: unless-stopped
+       read_only: true
+       cap_drop: [ALL]
+       security_opt: ["no-new-privileges:true"]
+       tmpfs:
+         - /tmp:rw,noexec,nosuid,size=64m
+   ```
+
+   Only the `web` container publishes a host port (`30051` -> container `3000`);
+   the browser never talks to the API directly, every call is proxied
+   server-side by the Astro SSR layer over the internal `api:8080` address.
+   Traefik routes `YOUR_PERSONAL_DOMAIN:35000` to
+   `http://192.168.1.200:30051` (see the `dothesplit` router/service in the
+   Traefik dynamic config above).
+
+4. **Fill in the secrets directly in the YAML.** The "Install via YAML" editor
+   takes only the compose file, no env-var table, no `.env`, so hardcode the
+   values before pasting. Replace every `<...>` placeholder:
+   - `<POSTGRES_PASSWORD>`: the same value in `postgres`, `migrate`, `api`, and
+     `worker` (it appears both on its own and inside each `DATABASE_URL`).
+     URL-encode it inside `DATABASE_URL` if it contains any of `: / ? # [ ] @`.
+   - `<EMAIL_ENC_KEY>`, `<EMAIL_HMAC_KEY>`, `<PASSWORD_PEPPER>`: the same value in
+     both `api` and `worker`.
+
+5. Click **Install** and watch the **Containers** tab until all four services
+   are healthy.
+
+##### DNS and port forwarding
+
+- DNS: point `YOUR_PERSONAL_DOMAIN` at the public IP (the `ddns-updater` app
+  keeps it current).
+- Router: no new port to open. DoTheSplit reuses the existing `websecure`
+  entrypoint (`35000`) that is already port-forwarded to `192.168.1.200`;
+  Traefik routes it by `Host` header and obtains the certificate over the DNS
+  challenge.
+
+##### First-run setup token
+
+The API prints a one-time setup token on first boot. From the TrueNAS shell:
+
+```sh
+docker logs ix-dothesplit-api-1 2>&1 | grep -A2 'first-run setup'
+```
+
+Open `https://YOUR_PERSONAL_DOMAIN:35000/setup`, paste the token, and create
+the admin account (display name + email + password >= 10 chars). The setup form
+locks permanently afterwards.
+
+##### Updates
+
+1. Refresh the migrations directory to the new tag (re-run the `curl | tar`
+   command with the new version).
+2. **Apps -> dothesplit -> Edit** -> bump the `image:` tags for `api`, `worker`,
+   and `web` to the new `:X.Y.Z` (no `v` prefix), then **Save**. The idempotent `migrate`
+   one-shot applies any new `*.up.sql` files on the next start.
 
 ### Data Protection
 
-* For quick errors: Set Periodic Snapshot Task for the datastore (enable **Recursive**
-if child datastores are in the datastore).
+- For quick errors: Set Periodic Snapshot Task for the datastore (enable **Recursive**
+  if child datastores are in the datastore).
 
-* For physical damage: Set Replication Task for the datastore to backup datastore
-in another Pool store.
+- For physical damage: Set Replication Task for the datastore to backup datastore
+  in another Pool store.
 
-* Physical damage and ransomware: Set TrueCloud Backup Task to Starj from backup
-datastore. Make the same for the Immich DB Backup datastore.
+- Physical damage and ransomware: Set TrueCloud Backup Task to Starj from backup
+  datastore. Make the same for the Immich DB Backup datastore.
 
 #### Photography/Videography workflow
+
+PENDING
