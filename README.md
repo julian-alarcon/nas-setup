@@ -4,7 +4,7 @@ NAS Setup with TrueNAS
 
 ## Installation
 
-[TruenNAS SCALE 24.10](https://www.truenas.com/download-truenas-scale/)iso image.
+[TruenNAS SCALE 25.10](https://www.truenas.com/download/) iso image.
 Create boot USB with `dd status=progress if=path/to/.iso of=path/to/USB`.
 
 ### Decrease pool for OS installation
@@ -64,7 +64,7 @@ systemctl start fancontrol
 4. Setup IP
    - IP: `192.168.1.200/24`
    - Gateway: `192.168/0/1`
-   - Nameservers: `1.1.1.1, 8.8.8.8, 192.168.0.1`
+   - Nameservers: `194.242.2.2, 9.9.9.9, 192.168.0.1`
 
 ### User setup
 
@@ -562,7 +562,7 @@ Create `pgdata` and `migrations` as **plain directories**, not ZFS datasets, a
 dataset mountpoint can't be `rm`'d and gets pinned busy on any deploy hiccup.
 
 UID `70` is the `postgres` user inside the **`-alpine`** Postgres image pinned
-below (`postgres:18.3-alpine3.22`). The Debian-based `postgres:18` image instead
+below (`postgres:18.4-alpine3.22`). The Debian-based `postgres:18` image instead
 runs as UID `999`, so if you ever switch off the alpine tag, re-`chown` `pgdata`
 to `999:999`. Either way, do **not** apply the dataset `Apps` permission preset
 (UID 568) to `pgdata` or Postgres refuses to start.
@@ -582,16 +582,18 @@ ls   # should list 0001_*.up.sql, 0001_*.down.sql, …
 Refresh this directory to the new tag artifacts before bumping image versions on
 upgrades.
 
-##### Generate the four secrets
+##### Generate the five secrets
 
 Run once and store the output in a password manager **before** continuing.
 Losing `EMAIL_ENC_KEY`, `EMAIL_HMAC_KEY`, or `PASSWORD_PEPPER` after the database
-has data makes that data unrecoverable.
+has data makes that data unrecoverable (rotating `JWT_SIGNING_KEY` only forces a
+re-login).
 
 ```sh
 echo "EMAIL_ENC_KEY=$(openssl rand -base64 32)"
 echo "EMAIL_HMAC_KEY=$(openssl rand -base64 32)"
 echo "PASSWORD_PEPPER=$(openssl rand -base64 32)"
+echo "JWT_SIGNING_KEY=$(openssl rand -base64 32)"
 echo "POSTGRES_PASSWORD=$(openssl rand -base64 24)"
 ```
 
@@ -605,12 +607,14 @@ postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable
 ##### Install the Custom App
 
 1. **Apps -> Discover Apps -> Custom App**.
-2. **Application Name**: `dothesplit`.
-3. **Install via custom YAML**: paste the compose below. `COOKIE_SECURE` is
-   `true` and `WEB_ORIGIN` points at the public HTTPS URL because Traefik
-   terminates TLS in front of the web container. Substitute your release tag for
-   `1.0.0`. GHCR image tags carry **no** `v` prefix (`dothesplit-api:1.0.0`),
-   unlike the git tag and `curl | tar` URL above (`v1.0.0`), don't conflate them:
+2. **Application Name**: `custom-dothesplit`.
+3. **Install via custom YAML**: paste the compose below. One image
+   (`dothesplit`) now serves both the JSON API and the embedded client-side Vue
+   SPA, so `api` and `worker` share it. `COOKIE_SECURE` is `true` and
+   `WEB_ORIGIN` points at the public HTTPS URL because Traefik terminates TLS in
+   front of the app. Substitute your release tag for `1.0.0`. The GHCR image tag
+   carries **no** `v` prefix (`dothesplit:1.0.0`), unlike the git tag and
+   `curl | tar` URL above (`v1.0.0`), don't conflate them:
 
    ```yaml
    services:
@@ -654,7 +658,7 @@ postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable
          - /tmp:rw,noexec,nosuid,size=8m
 
      api:
-       image: ghcr.io/julian-alarcon/dothesplit-api:1.0.0
+       image: ghcr.io/julian-alarcon/dothesplit:1.0.0
        depends_on:
          postgres:
            condition: service_healthy
@@ -668,8 +672,12 @@ postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable
          EMAIL_ENC_KEY: "<EMAIL_ENC_KEY>"
          EMAIL_HMAC_KEY: "<EMAIL_HMAC_KEY>"
          PASSWORD_PEPPER: "<PASSWORD_PEPPER>"
+         JWT_SIGNING_KEY: "<JWT_SIGNING_KEY>"
          TRUSTED_PROXIES: "192.168.1.200/32"
          LOG_LEVEL: info
+       ports:
+         # The api binary serves both /v1 and the embedded SPA.
+         - "30051:8080"
        restart: unless-stopped
        healthcheck:
          test: ["CMD", "/api", "--healthcheck"]
@@ -684,7 +692,7 @@ postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable
          - /tmp:rw,noexec,nosuid,size=32m
 
      worker:
-       image: ghcr.io/julian-alarcon/dothesplit-api:1.0.0
+       image: ghcr.io/julian-alarcon/dothesplit:1.0.0
        depends_on:
          postgres:
            condition: service_healthy
@@ -696,6 +704,7 @@ postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable
          EMAIL_ENC_KEY: "<EMAIL_ENC_KEY>"
          EMAIL_HMAC_KEY: "<EMAIL_HMAC_KEY>"
          PASSWORD_PEPPER: "<PASSWORD_PEPPER>"
+         JWT_SIGNING_KEY: "<JWT_SIGNING_KEY>"
          LOG_LEVEL: info
        restart: unless-stopped
        read_only: true
@@ -703,32 +712,13 @@ postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable
        security_opt: ["no-new-privileges:true"]
        tmpfs:
          - /tmp:rw,noexec,nosuid,size=32m
-
-     web:
-       image: ghcr.io/julian-alarcon/dothesplit-web:1.0.0
-       depends_on:
-         - api
-       environment:
-         API_BASE_URL_INTERNAL: http://api:8080
-         PUBLIC_API_BASE_URL: "https://YOUR_PERSONAL_DOMAIN:35000"
-         HOST: "0.0.0.0"
-         PORT: "3000"
-       ports:
-         - "30051:3000"
-       restart: unless-stopped
-       read_only: true
-       cap_drop: [ALL]
-       security_opt: ["no-new-privileges:true"]
-       tmpfs:
-         - /tmp:rw,noexec,nosuid,size=64m
    ```
 
-   Only the `web` container publishes a host port (`30051` -> container `3000`);
-   the browser never talks to the API directly, every call is proxied
-   server-side by the Astro SSR layer over the internal `api:8080` address.
-   Traefik routes `YOUR_PERSONAL_DOMAIN:35000` to
-   `http://192.168.1.200:30051` (see the `dothesplit` router/service in the
-   Traefik dynamic config above).
+   Only the `api` container publishes a host port (`30051` -> container `8080`);
+   it serves both `/v1` and the embedded client-side Vue SPA from one origin, so
+   the browser calls `/v1` directly (same origin) once the SPA loads. Traefik
+   routes `YOUR_PERSONAL_DOMAIN:35000` to `http://192.168.1.200:30051` (see the
+   `dothesplit` router/service in the Traefik dynamic config above).
 
 4. **Fill in the secrets directly in the YAML.** The "Install via YAML" editor
    takes only the compose file, no env-var table, no `.env`, so hardcode the
@@ -736,8 +726,8 @@ postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable
    - `<POSTGRES_PASSWORD>`: the same value in `postgres`, `migrate`, `api`, and
      `worker` (it appears both on its own and inside each `DATABASE_URL`).
      URL-encode it inside `DATABASE_URL` if it contains any of `: / ? # [ ] @`.
-   - `<EMAIL_ENC_KEY>`, `<EMAIL_HMAC_KEY>`, `<PASSWORD_PEPPER>`: the same value in
-     both `api` and `worker`.
+   - `<EMAIL_ENC_KEY>`, `<EMAIL_HMAC_KEY>`, `<PASSWORD_PEPPER>`,
+     `<JWT_SIGNING_KEY>`: the same value in both `api` and `worker`.
 
 5. Click **Install** and watch the **Containers** tab until all four services
    are healthy.
@@ -756,7 +746,7 @@ postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable
 The API prints a one-time setup token on first boot. From the TrueNAS shell:
 
 ```sh
-docker logs ix-dothesplit-api-1 2>&1 | grep -A2 'first-run setup'
+docker logs ix-custom-dothesplit-api-1 2>&1 | grep -A2 'first-run setup'
 ```
 
 Open `https://YOUR_PERSONAL_DOMAIN:35000/setup`, paste the token, and create
@@ -767,9 +757,10 @@ locks permanently afterwards.
 
 1. Refresh the migrations directory to the new tag (re-run the `curl | tar`
    command with the new version).
-2. **Apps -> dothesplit -> Edit** -> bump the `image:` tags for `api`, `worker`,
-   and `web` to the new `:X.Y.Z` (no `v` prefix), then **Save**. The idempotent `migrate`
-   one-shot applies any new `*.up.sql` files on the next start.
+2. **Apps -> dothesplit -> Edit** -> bump the `image:` tag for `api` and
+   `worker` (they share one image) to the new `:X.Y.Z` (no `v` prefix), then
+   **Save**. The idempotent `migrate` one-shot applies any new `*.up.sql` files
+   on the next start.
 
 ### Data Protection
 
