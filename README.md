@@ -390,10 +390,12 @@ Add configuration to file `/mnt/ssd-storage/apps-data/traefik/traefik_dynamic.ym
 
 ```yaml
 # TLS hardening applied to every router via the default options.
+# TLS 1.3 only: cipher suites are fixed by the spec, so no cipherSuites
+# tuning is needed (it would be ignored). Ensure all clients support TLS 1.3.
 tls:
   options:
     default:
-      minVersion: VersionTLS12
+      minVersion: VersionTLS13
       sniStrict: true
 
 http:
