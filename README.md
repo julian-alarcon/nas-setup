@@ -375,17 +375,27 @@ Dataset:
 
 ##### Set certificates and config
 
-Create the directory and file for certificates
+Create the directory and `acme.json` file for certificates. The storage target
+is a **file**, not a directory. Traefik refuses to start if `acme.json` is more
+permissive than `600`.
 
 ```sh
-mkdir /mnt/ssd-storage/apps-data/traefik/letsencrypt
-touch mkdir /mnt/ssd-storage/apps-data/traefik/letsencrypt/
-chmod 600 /mnt/ssd-storage/apps-data/traefik/letsencrypt/
+mkdir -p  /mnt/ssd-storage/apps-data/traefik/letsencrypt
+touch     /mnt/ssd-storage/apps-data/traefik/letsencrypt/acme.json
+chmod 600 /mnt/ssd-storage/apps-data/traefik/letsencrypt/acme.json
+chmod 700 /mnt/ssd-storage/apps-data/traefik/letsencrypt
 ```
 
 Add configuration to file `/mnt/ssd-storage/apps-data/traefik/traefik_dynamic.yml`
 
 ```yaml
+# TLS hardening applied to every router via the default options.
+tls:
+  options:
+    default:
+      minVersion: VersionTLS12
+      sniStrict: true
+
 http:
   routers:
     immich:
@@ -395,6 +405,8 @@ http:
         - websecure
       tls:
         certResolver: myresolver
+      middlewares:
+        - security-headers
 
     jellyfin:
       rule: "Host(`YOUR_PERSONAL_DOMAIN`) && PathPrefix(`/jellyfin`)"
@@ -404,6 +416,7 @@ http:
       tls:
         certResolver: myresolver
       middlewares:
+        - security-headers
         - strip-jellyfin-prefix
 
     dothesplit:
@@ -413,12 +426,43 @@ http:
         - websecure
       tls:
         certResolver: myresolver
+      middlewares:
+        - security-headers
+
+    # Traefik dashboard. LAN-only + basicAuth;  reachable only from
+    # the LAN
+    dashboard:
+      rule: "PathPrefix(`/dashboard`) || PathPrefix(`/api`)"
+      service: api@internal # Traefik's built-in dashboard/API service
+      entryPoints:
+        - dashboard
+      middlewares:
+        - dashboard-auth
 
   middlewares:
     strip-jellyfin-prefix:
       stripPrefix:
         prefixes:
           - "/jellyfin"
+
+    # HSTS + common hardening headers for all public routers.
+    security-headers:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        frameDeny: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: strict-origin-when-cross-origin
+
+    # basicAuth for the dashboard. Generate the hash with:
+    #   htpasswd -nbB admin 'YOUR_STRONG_PASSWORD'
+    # In a YAML file the hash is written literally (no `$$` escaping).
+    dashboard-auth:
+      basicAuth:
+        users:
+          - "admin:$2y$05$REPLACE_WITH_YOUR_BCRYPT_HASH"
 
   services:
     jellyfin-service:
@@ -450,11 +494,15 @@ services:
     restart: always
     container_name: custom-app-traefik-1
     command:
-      - "--log.level=DEBUG"
-      - "--api.insecure=true" # Enable Traefik dashboard (optional)
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
+      - "--log.level=INFO"
+      - "--accesslog=true"
+      # Dashboard served via api@internal on its own `dashboard` entrypoint
+      # (port 35001), bound to the `dashboard` router in the dynamic config.
+      - "--api.dashboard=true"
+      - "--providers.file.filename=/etc/traefik/traefik_dynamic.yml"
       - "--entrypoints.websecure.address=:35000"
+      # Dashboard entrypoint: LAN-only. Do NOT port-forward 35001 on the router.
+      - "--entrypoints.dashboard.address=:35001"
       - "--certificatesresolvers.myresolver.acme.email=letsencrypt@mail.desentropia.com" # Your email for Let's Encrypt notifications
       - "--certificatesresolvers.myresolver.acme.storage=/etc/traefik/letsencrypt/acme.json" # Storage for certificates
       - "--certificatesresolvers.myresolver.acme.dnschallenge=true"
@@ -462,29 +510,46 @@ services:
       - "--certificatesresolvers.myresolver.acme.dnschallenge.resolvers=1.1.1.1:53,8.8.8.8:53"
       # - "--certificatesresolvers.myresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory" # Use Let's Encrypt staging server
       - "--certificatesresolvers.myresolver.acme.caserver=https://acme-v02.api.letsencrypt.org/directory" # Use Let's Encrypt production
-      - "--providers.file.filename=/etc/traefik/traefik_dynamic.yml" # Use the dynamic config
     environment:
       - DNS_API_TOKEN=YOUR_DNS_API_TOKEN # Use the env vars your DNS provider expects
     ports:
-      - "35000:35000" # External port
-      - "30033:8080" # Traefik dashboard (optional)
+      - "35000:35000" # Public entrypoint (port-forward this one)
+      - "35001:35001" # Dashboard entrypoint, LAN-only (do NOT port-forward)
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock # Required for Docker provider
       - /mnt/ssd-storage/apps-data/traefik:/etc/traefik/
-  # Whoami Service
-  whoami:
-    image: traefik/whoami:v1.11 # https://github.com/traefik/whoami/releases
-    restart: on-failure:5
-    container_name: custom-app-traefik-whoami-service-1
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.whoami.rule=Host(`YOUR_PERSONAL_DOMAIN`)" # Change to your desired host
-      - "traefik.http.routers.whoami.entrypoints=websecure" # Use websecure for HTTPS
-      - "traefik.http.routers.whoami.tls.certResolver=myresolver" # Enable TLS if you want to secure this route
+    read_only: true # acme.json is on the mounted volume, so the cert store stays writable
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
 ```
 
-Port forwarding needs to be set in the router for port `35000` (or the port that
-you choose) to local NAS IP.
+Port forwarding: forward **only** port `35000` (the public entrypoint) on the
+router to the NAS IP.
+
+> [!IMPORTANT]
+> Do **not** port-forward `35001`. That is the dashboard entrypoint and must
+> stay LAN-only. Forwarding it would expose the Traefik dashboard to the
+> internet (basicAuth would be the only thing protecting it).
+
+##### Dashboard access (LAN-only)
+
+The dashboard is on the `dashboard` entrypoint (port `35001`), reached by the
+NAS LAN IP, so it is unreachable from the internet as long as `35001` is not
+port-forwarded. It is served over plain HTTP (the Let's Encrypt cert is for the
+public hostname, not the IP), with basicAuth gating access.
+
+1. Generate the basicAuth hash and replace `REPLACE_WITH_YOUR_BCRYPT_HASH` in
+   the `dashboard-auth` middleware:
+
+   ```sh
+   htpasswd -nbB admin 'YOUR_STRONG_PASSWORD'
+   # no htpasswd available:
+   # openssl passwd -apr1 'YOUR_STRONG_PASSWORD'   # then prefix with "admin:"
+   ```
+
+2. From a LAN host, open `http://192.168.1.200:35001/dashboard/` (trailing
+   slash required) and authenticate with the `admin` user.
 
 #### Immich
 
