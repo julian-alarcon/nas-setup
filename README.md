@@ -409,6 +409,7 @@ http:
         certResolver: myresolver
       middlewares:
         - security-headers
+        - compress
 
     jellyfin:
       rule: "Host(`YOUR_PERSONAL_DOMAIN`) && PathPrefix(`/jellyfin`)"
@@ -430,6 +431,7 @@ http:
         certResolver: myresolver
       middlewares:
         - security-headers
+        - compress
 
     # Traefik dashboard. LAN-only + basicAuth;  reachable only from
     # the LAN
@@ -442,6 +444,12 @@ http:
         - dashboard-auth
 
   middlewares:
+    # gzip/brotli/zstd for text responses (HTML/JS/CSS/JSON). Traefik negotiates
+    # the best algorithm per client and skips already-compressed media types,
+    # so it is applied only to the web UIs (not jellyfin's media streams).
+    compress:
+      compress: {}
+
     strip-jellyfin-prefix:
       stripPrefix:
         prefixes:
