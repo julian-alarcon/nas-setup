@@ -960,14 +960,19 @@ Then apply the [Memos security recommendations](https://usememos.com/docs/config
 
 ### Data Protection
 
-- For quick errors: Set Periodic Snapshot Task for the datastore (enable **Recursive**
-  if child datastores are in the datastore).
+Three tiers give a 3-2-1 result (live data -> local ZFS replica -> offsite S3):
 
-- For physical damage: Set Replication Task for the datastore to backup datastore
-  in another Pool store.
+- **Quick errors (snapshots):** Periodic Snapshot Task on the datastore (enable
+  **Recursive** if it has child datastores).
 
-- Physical damage and ransomware: Set TrueCloud Backup Task to Starj from backup
-  datastore. Make the same for the Immich DB Backup datastore.
+- **Physical damage (local replica):** Replication Task copying the datastore to
+  a backup datastore in another pool. For personal media this replicates
+  `/mnt/personal-media` -> `/mnt/backup-and-downloads/backups/backup-personal-media`.
+
+- **Offsite + ransomware (encrypted cloud):** restic backup of the replicated
+  copy to AWS S3 Glacier Instant Retrieval, client-side encrypted, weekly,
+  keep-last-7. Setup, OpenTofu, script and DR runbook:
+  [liberte-backup](https://gitlab.com/julian-alarcon/liberte-backup).
 
 #### Photography/Videography workflow
 
