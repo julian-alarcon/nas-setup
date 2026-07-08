@@ -345,6 +345,30 @@ Options:
 
 Enter to shell for qbittorrent container and check `curl https://ipleak.net/json/`
 
+#### DNS model
+
+With a single ISP public IP, use one dynamic **anchor** host and point every
+service at it with a static CNAME.
+
+- **Anchor** `YOUR_ANCHOR_DOMAIN`: `A` + `AAAA` -> the home public IP. This is
+  the **only** record `ddns-updater` maintains.
+- **Services** (one subdomain per app, and any new one): a static `CNAME` ->
+  `YOUR_ANCHOR_DOMAIN`. Created once, never edited; they inherit the anchor's
+  IPv4/IPv6 automatically.
+- **Apex** (root domain): left free (reserved for a future landing page). Apex
+  and home IP stay decoupled.
+
+Rules:
+
+- Keep every NAS record **unproxied** (DNS resolves straight to the home IP). A
+  CDN/proxy in front would not pass the custom port `35000` and would break
+  Traefik's TLS.
+- Use **explicit CNAMEs per service**, not a `*` wildcard. A wildcard resolves
+  every possible name to the home IP (wider attack surface); explicit records
+  mean only intended hostnames resolve.
+- Adding a service = one CNAME + one Traefik router. No `ddns-updater` change, no
+  new port-forward.
+
 #### ddns-updater
 
 Install from Applications (`community`)
@@ -358,14 +382,16 @@ Host path: /mnt/ssd-storage/apps-data/ddns-updater
 
 ##### DNS provider prerequisites
 
-1. Create an `A` record for the subdomain pointing at any placeholder IP (the
-   updater overwrites it on first run). Disable any CDN proxying so Traefik can
-   complete the Let's Encrypt challenge and reach the origin.
+1. Create the anchor `YOUR_ANCHOR_DOMAIN` as `A` (+ `AAAA` for IPv6) pointing at
+   any placeholder IP; the updater overwrites it on first run. Keep it unproxied
+   so Traefik can complete the Let's Encrypt challenge and reach the origin.
 2. Get the zone ID and create a DNS-edit API token scoped to that zone.
 
 ##### App config
 
-Set the provider, domain, IP version, zone ID, and API token from the steps above.
+Configure a **single** entry for the anchor `YOUR_ANCHOR_DOMAIN` (provider, IP
+version `ipv4` + `ipv6`, zone ID, API token). Every service hostname is a static
+CNAME to this anchor, so it needs no `ddns-updater` entry of its own.
 
 #### Traefik reverse proxy setup
 
@@ -401,7 +427,7 @@ tls:
 http:
   routers:
     immich:
-      rule: "Host(`YOUR_PHOTOS_DOMAIN`) && PathPrefix(`/immich`)"
+      rule: "Host(`YOUR_IMMICH_DOMAIN`) && PathPrefix(`/immich`)"
       service: immich-service
       entryPoints:
         - websecure
@@ -412,7 +438,7 @@ http:
         - compress
 
     jellyfin:
-      rule: "Host(`YOUR_PERSONAL_DOMAIN`) && PathPrefix(`/jellyfin`)"
+      rule: "Host(`YOUR_JELLYFIN_DOMAIN`) && PathPrefix(`/jellyfin`)"
       service: jellyfin-service
       entryPoints:
         - websecure
@@ -423,8 +449,21 @@ http:
         - strip-jellyfin-prefix
 
     dothesplit:
-      rule: "Host(`YOUR_PERSONAL_DOMAIN`)"
+      rule: "Host(`YOUR_DOTHESPLIT_DOMAIN`)"
       service: dothesplit-service
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: myresolver
+      middlewares:
+        - security-headers
+        - compress
+
+    # Memos runs on its own subdomain (it does not support a URL sub-path
+    # reliably: its frontend uses absolute asset paths).
+    memos:
+      rule: "Host(`YOUR_MEMOS_DOMAIN`)"
+      service: memos-service
       entryPoints:
         - websecure
       tls:
@@ -489,6 +528,11 @@ http:
       loadBalancer:
         servers:
           - url: "http://192.168.1.200:30051"
+
+    memos-service:
+      loadBalancer:
+        servers:
+          - url: "http://192.168.1.200:30061"
 ```
 
 ##### Traefik app
@@ -599,7 +643,7 @@ Enter to the WebUI and set the default username (email) and password for
 `admin` user.
 
 Server Settings:
-External domain: `https://YOUR_PHOTOS_DOMAIN:35000`
+External domain: `https://YOUR_IMMICH_DOMAIN:35000`
 Storage Template:
 Enable storage template engine: **Checked**
 Template preset: `2022/2022-02-03/IMAGE_56437`
@@ -615,7 +659,7 @@ From address: `<immich@>`
 [https://github.com/julian-alarcon/DoTheSplit/](https://github.com/julian-alarcon/DoTheSplit/)
 
 Expense-sharing app. Custom App published through Traefik at
-`https://YOUR_PERSONAL_DOMAIN:35000/`. Full walkthrough in the project's
+`https://YOUR_DOTHESPLIT_DOMAIN:35000/`. Full walkthrough in the project's
 `INSTALL.md`; below is the NAS-specific summary.
 
 Datasets:
@@ -742,7 +786,7 @@ postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable
        environment:
          DATABASE_URL: "postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable"
          API_HTTP_ADDR: ":8080"
-         WEB_ORIGIN: "https://YOUR_PERSONAL_DOMAIN:35000"
+         WEB_ORIGIN: "https://YOUR_DOTHESPLIT_DOMAIN:35000"
          COOKIE_SECURE: "true"
          EMAIL_ENC_KEY: "<EMAIL_ENC_KEY>"
          EMAIL_HMAC_KEY: "<EMAIL_HMAC_KEY>"
@@ -792,7 +836,7 @@ postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable
    Only the `api` container publishes a host port (`30051` -> container `8080`);
    it serves both `/v1` and the embedded client-side Vue SPA from one origin, so
    the browser calls `/v1` directly (same origin) once the SPA loads. Traefik
-   routes `YOUR_PERSONAL_DOMAIN:35000` to `http://192.168.1.200:30051` (see the
+   routes `YOUR_DOTHESPLIT_DOMAIN:35000` to `http://192.168.1.200:30051` (see the
    `dothesplit` router/service in the Traefik dynamic config above).
 
 4. **Fill in the secrets directly in the YAML.** The "Install via YAML" editor
@@ -809,8 +853,8 @@ postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable
 
 ##### DNS and port forwarding
 
-- DNS: point `YOUR_PERSONAL_DOMAIN` at the public IP (the `ddns-updater` app
-  keeps it current).
+- DNS: `YOUR_DOTHESPLIT_DOMAIN` is a static CNAME -> `YOUR_ANCHOR_DOMAIN` (see
+  the DNS model section); `ddns-updater` keeps the anchor current.
 - Router: no new port to open. DoTheSplit reuses the existing `websecure`
   entrypoint (`35000`) that is already port-forwarded to `192.168.1.200`;
   Traefik routes it by `Host` header and obtains the certificate over the DNS
@@ -824,7 +868,7 @@ The API prints a one-time setup token on first boot. From the TrueNAS shell:
 docker logs ix-custom-dothesplit-api-1 2>&1 | grep -A2 'first-run setup'
 ```
 
-Open `https://YOUR_PERSONAL_DOMAIN:35000/setup`, paste the token, and create
+Open `https://YOUR_DOTHESPLIT_DOMAIN:35000/setup`, paste the token, and create
 the admin account (display name + email + password >= 10 chars). The setup form
 locks permanently afterwards.
 
@@ -836,6 +880,83 @@ locks permanently afterwards.
    `worker` (they share one image) to the new `:X.Y.Z` (no `v` prefix), then
    **Save**. The idempotent `migrate` one-shot applies any new `*.up.sql` files
    on the next start.
+
+#### Memos
+
+[https://github.com/usememos/memos](https://github.com/usememos/memos)
+
+Lightweight self-hosted note-taking app. Uses SQLite (no external database
+needed). Published through Traefik at `https://YOUR_MEMOS_DOMAIN:35000/`
+on the shared `websecure` entrypoint.
+
+Datasets:
+
+- `ssd-storage/apps-data/memos` (Dataset Preset: `Apps`)
+
+The SQLite database and uploads live in the dataset root, no subdirectories to
+pre-create. The `Apps` preset already sets ownership to UID/GID 568 (`apps`),
+which the container writes as.
+
+##### Install the Custom App
+
+1. **Apps -> Discover Apps -> Custom App**.
+2. **Application Name**: `custom-memos`.
+3. **Install via custom YAML**: paste the compose below. `MEMOS_DRIVER=sqlite`
+   is the default, so no database container is needed. Only the `memos`
+   container publishes a host port (`30061` -> container `5230`), matching the
+   `memos-service` in the Traefik dynamic config above.
+
+   ```yaml
+   services:
+     memos:
+       image: neosmemo/memos:stable # https://github.com/usememos/memos/releases
+       restart: unless-stopped
+       container_name: custom-memos-1
+       environment:
+         - MEMOS_MODE=prod
+         - MEMOS_DRIVER=sqlite
+         - MEMOS_PORT=5230
+         # Public URL, required behind a reverse proxy.
+         - MEMOS_INSTANCE_URL=https://YOUR_MEMOS_DOMAIN:35000
+         - TZ=Europe/Berlin
+       ports:
+         - "30061:5230"
+       volumes:
+         - /mnt/ssd-storage/apps-data/memos:/var/opt/memos
+       security_opt: ["no-new-privileges:true"]
+       mem_limit: 256m
+       pids_limit: 100
+   ```
+
+4. Click **Install** and watch the **Containers** tab until the service is
+   healthy.
+
+##### DNS and port forwarding
+
+- DNS: create a static `CNAME` `YOUR_MEMOS_DOMAIN` -> `YOUR_ANCHOR_DOMAIN`
+  (unproxied), per the DNS model section. No `ddns-updater` entry needed.
+- Router: no new port to open. Memos reuses the existing `websecure` entrypoint
+  (`35000`); Traefik routes it by `Host` header and obtains the certificate over
+  the DNS challenge.
+
+##### First-run setup
+
+Open `https://YOUR_MEMOS_DOMAIN:35000/` and create the admin account on
+the first visit (the first registered user becomes the host/admin). Protect this
+host account carefully.
+
+Then apply the [Memos security recommendations](https://usememos.com/docs/configuration/security):
+
+- **Settings -> System**: disable **Allow user signup** (private instance).
+- **Settings -> System**: disable public memo visibility if nothing should be
+  publicly reachable.
+- Review who can create personal access tokens; avoid indefinitely active
+  tokens and rotate any that leak.
+- `MEMOS_MODE=prod` (set above) avoids demo mode's hardcoded JWT secret, never
+  run demo mode in production.
+- Back up the SQLite DB and attachments (both live under
+  `ssd-storage/apps-data/memos`, covered by the snapshot/replication tasks
+  below).
 
 ### Data Protection
 
