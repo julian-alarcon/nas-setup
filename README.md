@@ -993,6 +993,60 @@ Three tiers give a 3-2-1 result (live data -> local ZFS replica -> offsite S3):
   keep-last-7. Setup, OpenTofu, script and DR runbook:
   [liberte-backup](https://gitlab.com/julian-alarcon/liberte-backup).
 
+#### Application data backups
+
+All three apps (DoTheSplit, Memos, Vikunja) use **SQLite**. The DB must be
+**dumped, not file-copied**, a live SQLite file copied mid-write can be
+inconsistent. A weekly cron dumps each app into a restic-backed directory, so the
+existing restic -> S3 job carries them offsite (no second mechanism).
+
+Script `/root/app-backups.sh` (verify container names/DB paths with `docker ps`):
+
+```sh
+#!/bin/sh
+# Application-consistent dumps into the restic-backed directory.
+# Run weekly, BEFORE the restic -> S3 job. Dumps are overwritten each run;
+# restic snapshots provide the history.
+set -eu
+
+DEST="/mnt/backup-and-downloads/backups/app-backups"
+mkdir -p "$DEST"
+
+# DoTheSplit (SQLite): online .backup while the app is running.
+sqlite3 "/mnt/ssd-storage/apps-data/dothesplit/data/dts.db" \
+  ".backup '$DEST/dothesplit.db'"
+
+# Vikunja: built-in consistent dump (database + files + config in one zip).
+docker exec custom-app-vikunja-1 /app/vikunja/vikunja dump -p /app/vikunja/files/dump.zip
+mv "/mnt/ssd-storage/apps-data/vikunja/files/dump.zip" "$DEST/vikunja.zip"
+
+# Memos (SQLite): online .backup for a consistent copy while running.
+sqlite3 "/mnt/ssd-storage/apps-data/memos/memos_prod.db" \
+  ".backup '$DEST/memos.db'"
+
+# Both .backup lines need sqlite3 on the host; if absent, run it in a small
+# sqlite container mounting the same paths.
+```
+
+Deploy and lock it down:
+
+```sh
+cp app-backups.sh /root/app-backups.sh
+chmod 700 /root/app-backups.sh
+```
+
+Schedule it **before** the restic run (**System Settings > Advanced > Cron
+Jobs**):
+
+- **Description:** `app-backups`
+- **Command:** `/root/app-backups.sh`
+- **Run As User:** `root`
+- **Schedule:** `30 0 * * fri` (00:30 Friday, ahead of the 01:00 restic run).
+
+Then add `/mnt/backup-and-downloads/backups/app-backups` to the restic job's
+source paths (in [liberte-backup](https://gitlab.com/julian-alarcon/liberte-backup)),
+so the dumps sync to S3 alongside the personal media.
+
 #### Photography/Videography workflow
 
 PENDING
