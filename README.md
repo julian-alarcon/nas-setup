@@ -792,8 +792,9 @@ Datasets:
 - `ssd-storage/apps-data/memos` (Dataset Preset: `Apps`)
 
 The SQLite database and uploads live in the dataset root, no subdirectories to
-pre-create. The `Apps` preset already sets ownership to UID/GID 568 (`apps`),
-which the container writes as.
+pre-create. The Memos entrypoint starts as root, `chown`s `/var/opt/memos` to
+its non-root user **UID/GID 10001**, then drops privileges, so it fixes the
+mounted directory's ownership itself. No manual `chown` is needed.
 
 ##### Install the Custom App
 
@@ -809,7 +810,7 @@ which the container writes as.
      memos:
        image: neosmemo/memos:stable # https://github.com/usememos/memos/releases
        restart: unless-stopped
-       container_name: custom-memos-1
+       container_name: custom-app-memos-1
        environment:
          - MEMOS_MODE=prod
          - MEMOS_DRIVER=sqlite
