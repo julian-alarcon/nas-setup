@@ -472,6 +472,17 @@ http:
         - security-headers
         - compress
 
+    vikunja:
+      rule: "Host(`YOUR_VIKUNJA_DOMAIN`)"
+      service: vikunja-service
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: myresolver
+      middlewares:
+        - security-headers
+        - compress
+
     # Traefik dashboard. LAN-only + basicAuth;  reachable only from
     # the LAN
     dashboard:
@@ -533,6 +544,11 @@ http:
       loadBalancer:
         servers:
           - url: "http://192.168.1.200:30061"
+
+    vikunja-service:
+      loadBalancer:
+        servers:
+          - url: "http://192.168.1.200:30071"
 ```
 
 ##### Traefik app
@@ -856,6 +872,110 @@ Then apply the [Memos security recommendations](https://usememos.com/docs/config
 - Back up the SQLite DB and attachments (both live under
   `ssd-storage/apps-data/memos`, covered by the snapshot/replication tasks
   below).
+
+#### Vikunja
+
+[https://vikunja.io](https://vikunja.io)
+
+Self-hosted to-do / project management app. Uses SQLite (no external database
+needed). One image serves both API and frontend. Published through Traefik at
+`https://YOUR_VIKUNJA_DOMAIN:35000/` on the shared `websecure` entrypoint.
+
+Datasets:
+
+- `ssd-storage/apps-data/vikunja` (Dataset Preset: `Apps`)
+
+Create the `db` and `files` subdirectories the container writes to (UID/GID 568
+from the `Apps` preset):
+
+```sh
+mkdir -p /mnt/ssd-storage/apps-data/vikunja/{db,files}
+chown -R 568:568 /mnt/ssd-storage/apps-data/vikunja
+```
+
+##### Generate the service secret
+
+`VIKUNJA_SERVICE_SECRET` signs JWT tokens. If left unset Vikunja generates a
+random one at each start, invalidating all sessions on restart, so set a fixed
+value and store it in a password manager:
+
+```sh
+openssl rand -hex 32
+```
+
+##### Install the Custom App
+
+1. **Apps -> Discover Apps -> Custom App**.
+2. **Application Name**: `custom-vikunja`.
+3. **Install via custom YAML**: paste the compose below. `VIKUNJA_DATABASE_TYPE`
+   is `sqlite`, so no database container is needed. Only the `vikunja` container
+   publishes a host port (`30071` -> container `3456`), matching the
+   `vikunja-service` in the Traefik dynamic config above.
+
+   ```yaml
+   services:
+     vikunja:
+       image: vikunja/vikunja:2 # https://github.com/go-vikunja/vikunja/releases
+       restart: unless-stopped
+       container_name: custom-app-vikunja-1
+       user: "568:568"
+       environment:
+         # Public URL, trailing slash required (api<->frontend communication).
+         - VIKUNJA_SERVICE_PUBLICURL=https://YOUR_VIKUNJA_DOMAIN:35000/
+         - VIKUNJA_SERVICE_SECRET=<VIKUNJA_SERVICE_SECRET>
+         - VIKUNJA_DATABASE_TYPE=sqlite
+         - VIKUNJA_DATABASE_PATH=/db/vikunja.db
+         # Lock the instance down: no self-registration (create users via admin).
+         - VIKUNJA_SERVICE_ENABLEREGISTRATION=false
+         - VIKUNJA_SERVICE_TIMEZONE=Europe/Berlin
+         # SMTP for notifications/password-reset. STARTTLS on 587 by default;
+         # set VIKUNJA_MAILER_FORCESSL=true only for implicit TLS on 465.
+         - VIKUNJA_MAILER_ENABLED=true
+         - VIKUNJA_MAILER_HOST=my-smtp-server
+         - VIKUNJA_MAILER_PORT=587
+         - VIKUNJA_MAILER_USERNAME=<username-for-smtp>
+         - VIKUNJA_MAILER_PASSWORD=<password-for-smtp>
+         - VIKUNJA_MAILER_FROMEMAIL=<vikunja@mydomain.com>
+       ports:
+         - "30071:3456"
+       volumes:
+         - /mnt/ssd-storage/apps-data/vikunja/db:/db
+         - /mnt/ssd-storage/apps-data/vikunja/files:/app/vikunja/files
+       security_opt: ["no-new-privileges:true"]
+       mem_limit: 512m
+       pids_limit: 200
+   ```
+
+4. Click **Install** and watch the **Containers** tab until the service is
+   healthy.
+
+##### DNS and port forwarding
+
+- DNS: create a static `CNAME` `YOUR_VIKUNJA_DOMAIN` -> `YOUR_ANCHOR_DOMAIN`
+  (unproxied), per the DNS model section. No `ddns-updater` entry needed.
+- Router: no new port to open. Vikunja reuses the existing `websecure`
+  entrypoint (`35000`); Traefik routes it by `Host` header and obtains the
+  certificate over the DNS challenge.
+
+##### First-run setup
+
+With registration disabled, create the first user from the shell, then log in at
+`https://YOUR_VIKUNJA_DOMAIN:35000/`:
+
+```sh
+docker exec -it custom-app-vikunja-1 /app/vikunja/vikunja user create \
+  -u admin -e "<your-email>" -p "<strong-password>"
+```
+
+Security notes:
+
+- Keep `VIKUNJA_SERVICE_SECRET` fixed and backed up; rotating it logs everyone
+  out.
+- Registration stays disabled; add users with `vikunja user create`.
+- TLS is terminated by Traefik; `VIKUNJA_SERVICE_PUBLICURL` uses `https` so
+  generated links and api/frontend calls use the correct origin.
+- Back up `db/vikunja.db` and `files/` (covered by the snapshot/replication
+  tasks below).
 
 ### Data Protection
 
