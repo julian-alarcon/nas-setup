@@ -664,44 +664,20 @@ Expense-sharing app. Custom App published through Traefik at
 
 Datasets:
 
-- `ssd-storage/apps-data/dothesplit`
+- `ssd-storage/apps-data/dothesplit` (Dataset Preset: `Apps`)
 
-##### Pre-create host directories
-
-The wizard cannot create directories on save, so create them from the shell:
-
-```sh
-mkdir -p /mnt/ssd-storage/apps-data/dothesplit/pgdata
-mkdir -p /mnt/ssd-storage/apps-data/dothesplit/migrations
-chown -R 70:70 /mnt/ssd-storage/apps-data/dothesplit/pgdata
-chmod 700      /mnt/ssd-storage/apps-data/dothesplit/pgdata
-```
-
-Create `pgdata` and `migrations` as **plain directories**, not ZFS datasets, a
-dataset mountpoint can't be `rm`'d and gets pinned busy on any deploy hiccup.
-
-UID `70` is the `postgres` user inside the **`-alpine`** Postgres image pinned
-below (`postgres:18.4-alpine3.22`). The Debian-based `postgres:18` image instead
-runs as UID `999`, so if you ever switch off the alpine tag, re-`chown` `pgdata`
-to `999:999`. Either way, do **not** apply the dataset `Apps` permission preset
-(UID 568) to `pgdata` or Postgres refuses to start.
-
-##### Drop the migrations on disk
-
-The `migrate` one-shot reads SQL from a host path. Fetch the migrations matching
-the release tag you install (replace `v1.0.0`):
+A single image serves the JSON API and the embedded Vue SPA, and uses
+**SQLite** (no external database). The image is distroless and runs as the
+baked-in `nonroot` user **UID/GID 65532**, with no shell to fix permissions at
+startup. So the host `data` directory (where `dts.db` + WAL live) must be owned
+by 65532 **before** first start; do **not** apply the `Apps` preset (568):
 
 ```sh
-cd /mnt/ssd-storage/apps-data/dothesplit/migrations
-curl -fsSL https://github.com/julian-alarcon/dothesplit/archive/refs/tags/v1.0.0.tar.gz \
-  | tar -xz --strip-components=3 --wildcards '*/api/migrations'
-ls   # should list 0001_*.up.sql, 0001_*.down.sql, …
+mkdir -p /mnt/ssd-storage/apps-data/dothesplit/data
+chown -R 65532:65532 /mnt/ssd-storage/apps-data/dothesplit/data
 ```
 
-Refresh this directory to the new tag artifacts before bumping image versions on
-upgrades.
-
-##### Generate the five secrets
+##### Generate the four secrets
 
 Run once and store the output in a password manager **before** continuing.
 Losing `EMAIL_ENC_KEY`, `EMAIL_HMAC_KEY`, or `PASSWORD_PEPPER` after the database
@@ -713,81 +689,31 @@ echo "EMAIL_ENC_KEY=$(openssl rand -base64 32)"
 echo "EMAIL_HMAC_KEY=$(openssl rand -base64 32)"
 echo "PASSWORD_PEPPER=$(openssl rand -base64 32)"
 echo "JWT_SIGNING_KEY=$(openssl rand -base64 32)"
-echo "POSTGRES_PASSWORD=$(openssl rand -base64 24)"
-```
-
-Build `DATABASE_URL` from the Postgres password (URL-encode it if it contains
-any of `: / ? # [ ] @`):
-
-```
-postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable
 ```
 
 ##### Install the Custom App
 
 1. **Apps -> Discover Apps -> Custom App**.
 2. **Application Name**: `custom-dothesplit`.
-3. **Install via custom YAML**: paste the compose below. One image
-   (`dothesplit`) now serves both the JSON API and the embedded client-side Vue
-   SPA, so `api` and `worker` share it. `COOKIE_SECURE` is `true` and
-   `WEB_ORIGIN` points at the public HTTPS URL because Traefik terminates TLS in
-   front of the app. Substitute your release tag for `1.0.0`. The GHCR image tag
-   carries **no** `v` prefix (`dothesplit:1.0.0`), unlike the git tag and
-   `curl | tar` URL above (`v1.0.0`), don't conflate them:
+3. **Install via custom YAML**: paste the compose below. `COOKIE_SECURE` is
+   `true` and `WEB_ORIGIN` points at the public HTTPS URL because Traefik
+   terminates TLS in front of the app. The `:1` tag tracks the v1 major line; pin
+   an exact `:1.Y.Z` if you prefer manual upgrades. `read_only: true` keeps the
+   rootfs immutable; the SQLite DB is writable because it lives on the mounted
+   `/data` volume.
 
    ```yaml
    services:
-     postgres:
-       image: postgres:18.4-alpine3.22
+     dothesplit:
+       image: ghcr.io/julian-alarcon/dothesplit:1
        restart: unless-stopped
+       container_name: custom-app-dothesplit-1
        environment:
-         POSTGRES_USER: dts
-         POSTGRES_PASSWORD: "<POSTGRES_PASSWORD>"
-         POSTGRES_DB: dts
-       volumes:
-         - /mnt/ssd-storage/apps-data/dothesplit/pgdata:/var/lib/postgresql
-       healthcheck:
-         test: ["CMD-SHELL", "pg_isready -U dts -d dts"]
-         interval: 5s
-         timeout: 3s
-         retries: 10
-       cap_drop: [ALL]
-       cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
-       security_opt: ["no-new-privileges:true"]
-       mem_limit: 512m
-       pids_limit: 200
-
-     migrate:
-       image: migrate/migrate:v4.19.1
-       depends_on:
-         postgres:
-           condition: service_healthy
-       volumes:
-         - /mnt/ssd-storage/apps-data/dothesplit/migrations:/migrations:ro
-       environment:
-         DATABASE_URL: "postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable"
-       entrypoint: ["/bin/sh", "-c"]
-       command:
-         - 'exec migrate -path /migrations -database "$$DATABASE_URL" up'
-       restart: "no"
-       read_only: true
-       cap_drop: [ALL]
-       security_opt: ["no-new-privileges:true"]
-       tmpfs:
-         - /tmp:rw,noexec,nosuid,size=8m
-
-     api:
-       image: ghcr.io/julian-alarcon/dothesplit:1.0.0
-       depends_on:
-         postgres:
-           condition: service_healthy
-         migrate:
-           condition: service_completed_successfully
-       environment:
-         DATABASE_URL: "postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable"
          API_HTTP_ADDR: ":8080"
          WEB_ORIGIN: "https://YOUR_DOTHESPLIT_DOMAIN:35000"
          COOKIE_SECURE: "true"
+         DATABASE_DRIVER: sqlite
+         DATABASE_URL: "file:/data/dts.db"
          EMAIL_ENC_KEY: "<EMAIL_ENC_KEY>"
          EMAIL_HMAC_KEY: "<EMAIL_HMAC_KEY>"
          PASSWORD_PEPPER: "<PASSWORD_PEPPER>"
@@ -795,11 +721,12 @@ postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable
          TRUSTED_PROXIES: "192.168.1.200/32"
          LOG_LEVEL: info
        ports:
-         # The api binary serves both /v1 and the embedded SPA.
+         # The binary serves both /v1 and the embedded SPA.
          - "30051:8080"
-       restart: unless-stopped
+       volumes:
+         - /mnt/ssd-storage/apps-data/dothesplit/data:/data
        healthcheck:
-         test: ["CMD", "/api", "--healthcheck"]
+         test: ["CMD", "/dothesplit", "--healthcheck"]
          interval: 10s
          timeout: 3s
          retries: 5
@@ -809,47 +736,21 @@ postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable
        security_opt: ["no-new-privileges:true"]
        tmpfs:
          - /tmp:rw,noexec,nosuid,size=32m
-
-     worker:
-       image: ghcr.io/julian-alarcon/dothesplit:1.0.0
-       depends_on:
-         postgres:
-           condition: service_healthy
-         migrate:
-           condition: service_completed_successfully
-       entrypoint: ["/worker"]
-       environment:
-         DATABASE_URL: "postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable"
-         EMAIL_ENC_KEY: "<EMAIL_ENC_KEY>"
-         EMAIL_HMAC_KEY: "<EMAIL_HMAC_KEY>"
-         PASSWORD_PEPPER: "<PASSWORD_PEPPER>"
-         JWT_SIGNING_KEY: "<JWT_SIGNING_KEY>"
-         LOG_LEVEL: info
-       restart: unless-stopped
-       read_only: true
-       cap_drop: [ALL]
-       security_opt: ["no-new-privileges:true"]
-       tmpfs:
-         - /tmp:rw,noexec,nosuid,size=32m
    ```
 
-   Only the `api` container publishes a host port (`30051` -> container `8080`);
-   it serves both `/v1` and the embedded client-side Vue SPA from one origin, so
-   the browser calls `/v1` directly (same origin) once the SPA loads. Traefik
-   routes `YOUR_DOTHESPLIT_DOMAIN:35000` to `http://192.168.1.200:30051` (see the
+   The single container publishes a host port (`30051` -> container `8080`); it
+   serves both `/v1` and the embedded client-side Vue SPA from one origin, so the
+   browser calls `/v1` directly (same origin) once the SPA loads. Traefik routes
+   `YOUR_DOTHESPLIT_DOMAIN:35000` to `http://192.168.1.200:30051` (see the
    `dothesplit` router/service in the Traefik dynamic config above).
 
 4. **Fill in the secrets directly in the YAML.** The "Install via YAML" editor
    takes only the compose file, no env-var table, no `.env`, so hardcode the
-   values before pasting. Replace every `<...>` placeholder:
-   - `<POSTGRES_PASSWORD>`: the same value in `postgres`, `migrate`, `api`, and
-     `worker` (it appears both on its own and inside each `DATABASE_URL`).
-     URL-encode it inside `DATABASE_URL` if it contains any of `: / ? # [ ] @`.
-   - `<EMAIL_ENC_KEY>`, `<EMAIL_HMAC_KEY>`, `<PASSWORD_PEPPER>`,
-     `<JWT_SIGNING_KEY>`: the same value in both `api` and `worker`.
+   `<EMAIL_ENC_KEY>`, `<EMAIL_HMAC_KEY>`, `<PASSWORD_PEPPER>`, and
+   `<JWT_SIGNING_KEY>` values before pasting.
 
-5. Click **Install** and watch the **Containers** tab until all four services
-   are healthy.
+5. Click **Install** and watch the **Containers** tab until the service is
+   healthy.
 
 ##### DNS and port forwarding
 
@@ -865,7 +766,7 @@ postgres://dts:<POSTGRES_PASSWORD>@postgres:5432/dts?sslmode=disable
 The API prints a one-time setup token on first boot. From the TrueNAS shell:
 
 ```sh
-docker logs ix-custom-dothesplit-api-1 2>&1 | grep -A2 'first-run setup'
+docker logs custom-app-dothesplit-1 2>&1 | grep -A2 'first-run setup'
 ```
 
 Open `https://YOUR_DOTHESPLIT_DOMAIN:35000/setup`, paste the token, and create
@@ -874,12 +775,9 @@ locks permanently afterwards.
 
 ##### Updates
 
-1. Refresh the migrations directory to the new tag (re-run the `curl | tar`
-   command with the new version).
-2. **Apps -> dothesplit -> Edit** -> bump the `image:` tag for `api` and
-   `worker` (they share one image) to the new `:X.Y.Z` (no `v` prefix), then
-   **Save**. The idempotent `migrate` one-shot applies any new `*.up.sql` files
-   on the next start.
+**Apps -> dothesplit -> Edit** -> bump the `image:` tag to the new `:X.Y.Z` (no
+`v` prefix), then **Save**. The app applies any schema migrations to the SQLite
+DB on start.
 
 #### Memos
 
