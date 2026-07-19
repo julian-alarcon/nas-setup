@@ -1031,6 +1031,11 @@ Jobs**):
 - **Run As User:** `root`
 - **Schedule:** `30 0 * * *` (00:30 daily, ahead of the 01:00 restic run).
 
+On any failure the script emails a report via `midclt call mail.send` (to the
+TrueNAS local administrator address) and exits non-zero. Success is silent (no
+daily "OK" mail). Set `NOTIFY=0` to disable. TrueNAS Cron Jobs do not raise
+their own alert on a non-zero exit, so this email is the failure signal.
+
 The restic job backs up the whole `/mnt/backup-and-downloads/backups/` parent,
 so the dumps sync to S3 automatically, no separate source path needed. See
 [liberte-backup](https://gitlab.com/julian-alarcon/liberte-backup).
