@@ -997,41 +997,29 @@ Three tiers give a 3-2-1 result (live data -> local ZFS replica -> offsite S3):
 
 All three apps (DoTheSplit, Memos, Vikunja) use **SQLite**. The DB must be
 **dumped, not file-copied**, a live SQLite file copied mid-write can be
-inconsistent. A weekly cron dumps each app into a restic-backed directory, so the
+inconsistent. A daily cron dumps each app into a restic-backed directory, so the
 existing restic -> S3 job carries them offsite (no second mechanism).
 
-Script `/root/app-backups.sh` (verify container names/DB paths with `docker ps`):
+The dumps live in their own datastore so they snapshot/replicate independently
+of personal media. Create it once (**Datasets > Add Dataset**), child of the
+backup pool, named `backup-apps`, mounted at
+`/mnt/backup-and-downloads/backups/backup-apps`. It then gets the same
+three-tier protection as personal media above:
 
-```sh
-#!/bin/sh
-# Application-consistent dumps into the restic-backed directory.
-# Run weekly, BEFORE the restic -> S3 job. Dumps are overwritten each run;
-# restic snapshots provide the history.
-set -eu
+- **Snapshots:** add it to (or cover it with a recursive) Periodic Snapshot Task.
+- **Local replica:** Replication Task copies it to a backup datastore in another
+  pool, e.g. `/mnt/backup-and-downloads/backups/backup-apps` ->
+  `/mnt/<other-pool>/backups/backup-backup-apps`.
+- **Offsite:** the restic -> S3 job backs up the `backups/` parent, so it is
+  carried to S3 with the other local backups (no separate source path).
 
-DEST="/mnt/backup-and-downloads/backups/app-backups"
-mkdir -p "$DEST"
-
-# DoTheSplit (SQLite): online .backup while the app is running.
-sqlite3 "/mnt/ssd-storage/apps-data/dothesplit/data/dts.db" \
-  ".backup '$DEST/dothesplit.db'"
-
-# Vikunja: built-in consistent dump (database + files + config in one zip).
-docker exec custom-app-vikunja-1 /app/vikunja/vikunja dump -p /app/vikunja/files/dump.zip
-mv "/mnt/ssd-storage/apps-data/vikunja/files/dump.zip" "$DEST/vikunja.zip"
-
-# Memos (SQLite): online .backup for a consistent copy while running.
-sqlite3 "/mnt/ssd-storage/apps-data/memos/memos_prod.db" \
-  ".backup '$DEST/memos.db'"
-
-# Both .backup lines need sqlite3 on the host; if absent, run it in a small
-# sqlite container mounting the same paths.
-```
+The dump script lives at [`scripts/app-backups.sh`](scripts/app-backups.sh)
+(verify container names/DB paths with `docker ps`).
 
 Deploy and lock it down:
 
 ```sh
-cp app-backups.sh /root/app-backups.sh
+cp scripts/app-backups.sh /root/app-backups.sh
 chmod 700 /root/app-backups.sh
 ```
 
@@ -1041,11 +1029,11 @@ Jobs**):
 - **Description:** `app-backups`
 - **Command:** `/root/app-backups.sh`
 - **Run As User:** `root`
-- **Schedule:** `30 0 * * fri` (00:30 Friday, ahead of the 01:00 restic run).
+- **Schedule:** `30 0 * * *` (00:30 daily, ahead of the 01:00 restic run).
 
-Then add `/mnt/backup-and-downloads/backups/app-backups` to the restic job's
-source paths (in [liberte-backup](https://gitlab.com/julian-alarcon/liberte-backup)),
-so the dumps sync to S3 alongside the personal media.
+The restic job backs up the whole `/mnt/backup-and-downloads/backups/` parent,
+so the dumps sync to S3 automatically, no separate source path needed. See
+[liberte-backup](https://gitlab.com/julian-alarcon/liberte-backup).
 
 #### Photography/Videography workflow
 
