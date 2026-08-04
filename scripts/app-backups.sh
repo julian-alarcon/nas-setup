@@ -74,3 +74,8 @@ mv "/mnt/ssd-storage/apps-data/vikunja/files/vikunja.zip" "$DEST/vikunja.zip" \
 # Memos (SQLite): online .backup for a consistent copy while running.
 sqlite_backup "/mnt/ssd-storage/apps-data/memos/memos_prod.db" "memos.db" \
   || fail "Memos dump failed."
+
+# Dawarich (PostgreSQL/PostGIS): consistent cluster dump via pg_dumpall.
+# --clean --if-exists adds DROP statements so the restore replays cleanly.
+docker exec custom-app-dawarich-db-1 pg_dumpall --clean --if-exists --username=dawarich 2>>"$LOG" \
+  | gzip > "$DEST/dawarich.sql.gz" || fail "Dawarich dump failed."

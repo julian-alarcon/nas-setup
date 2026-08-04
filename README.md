@@ -483,6 +483,17 @@ http:
         - security-headers
         - compress
 
+    dawarich:
+      rule: "Host(`YOUR_DAWARICH_DOMAIN`)"
+      service: dawarich-service
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: myresolver
+      middlewares:
+        - security-headers
+        - compress
+
     # Traefik dashboard. LAN-only + basicAuth;  reachable only from
     # the LAN
     dashboard:
@@ -549,6 +560,11 @@ http:
       loadBalancer:
         servers:
           - url: "http://192.168.1.200:30071"
+
+    dawarich-service:
+      loadBalancer:
+        servers:
+          - url: "http://192.168.1.200:30081"
 ```
 
 ##### Traefik app
@@ -710,7 +726,7 @@ echo "JWT_SIGNING_KEY=$(openssl rand -base64 32)"
 ##### Install the Custom App
 
 1. **Apps -> Discover Apps -> Custom App**.
-2. **Application Name**: `custom-dothesplit`.
+2. **Application Name**: `custom-app-dothesplit`.
 3. **Install via custom YAML**: paste the compose below. `COOKIE_SECURE` is
    `true` and `WEB_ORIGIN` points at the public HTTPS URL because Traefik
    terminates TLS in front of the app. The `:1` tag tracks the v1 major line; pin
@@ -815,7 +831,7 @@ mounted directory's ownership itself. No manual `chown` is needed.
 ##### Install the Custom App
 
 1. **Apps -> Discover Apps -> Custom App**.
-2. **Application Name**: `custom-memos`.
+2. **Application Name**: `custom-app-memos`.
 3. **Install via custom YAML**: paste the compose below. `MEMOS_DRIVER=sqlite`
    is the default, so no database container is needed. Only the `memos`
    container publishes a host port (`30061` -> container `5230`), matching the
@@ -906,7 +922,7 @@ openssl rand -hex 32
 ##### Install the Custom App
 
 1. **Apps -> Discover Apps -> Custom App**.
-2. **Application Name**: `custom-vikunja`.
+2. **Application Name**: `custom-app-vikunja`.
 3. **Install via custom YAML**: paste the compose below. `VIKUNJA_DATABASE_TYPE`
    is `sqlite`, so no database container is needed. Only the `vikunja` container
    publishes a host port (`30071` -> container `3456`), matching the
@@ -977,6 +993,308 @@ Security notes:
 - Back up `db/vikunja.db` and `files/` (covered by the snapshot/replication
   tasks below).
 
+#### Dawarich
+
+[https://dawarich.app](https://dawarich.app)
+
+Self-hosted location-history / GPS-tracking app (a Google Timeline
+alternative). Unlike the other apps in this guide it uses **PostgreSQL/PostGIS**
+plus **Redis**, so the Custom App runs four containers: `custom-app-dawarich-db-1`,
+`custom-app-dawarich-redis-1`, `custom-app-dawarich-app-1`, and
+`custom-app-dawarich-sidekiq-1`. Published through
+Traefik at `https://YOUR_DAWARICH_DOMAIN:35000/` on the shared `websecure`
+entrypoint.
+
+Datasets:
+
+- `ssd-storage/apps-data/dawarich` (Dataset Preset: `Apps`)
+
+The Dawarich app containers run as a **non-root user** via the image's
+`PUID`/`PGID` support (do **not** use the compose `user:` directive with this
+image — the entrypoint needs root to set up the UID before dropping
+privileges). We reuse the `Apps` preset UID/GID **568**. PostgreSQL and Redis
+manage their own privilege dropping internally, so only the app-writable
+directories need a manual `chown`:
+
+```sh
+mkdir -p /mnt/ssd-storage/apps-data/dawarich/{db,shared,redis,public,watched,storage}
+chown -R 568:568 /mnt/ssd-storage/apps-data/dawarich/{public,watched,storage}
+```
+
+> [!NOTE]
+> Do **not** `chown` the `db` directory. The `postgis/postgis` entrypoint runs
+> as root, fixes `PGDATA` ownership to its internal `postgres` user, then drops
+> privileges. Pre-owning it to 568 would make the entrypoint fail.
+
+##### Generate the service secrets
+
+Run once and store the output in a password manager **before** continuing.
+`SECRET_KEY_BASE` signs/encrypts Rails sessions and cookies — losing it after
+the database has data invalidates all sessions; `POSTGRES_PASSWORD` is the
+PostgreSQL credentials the app and Sidekiq use to connect to the DB.
+
+```sh
+echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)"
+echo "SECRET_KEY_BASE=$(openssl rand -hex 64)"
+```
+
+##### Install the Custom App
+
+1. **Apps -> Discover Apps -> Custom App**.
+2. **Application Name**: `custom-app-dawarich`.
+3. **Install via custom YAML**: paste the compose below. It is adapted from the
+   [official compose](https://github.com/Freika/dawarich/blob/master/docker/docker-compose.yml)
+   with the following NAS-specific changes: named volumes replaced by bind
+   mounts under `/mnt/ssd-storage/apps-data/dawarich`; image pinned to `1.10.3`
+   (not `:latest`); `PUID`/`PGID` set so the app runs as non-root `568`; the
+   `dawarich_db_data` mount on the app container is omitted (backups are taken
+   with `pg_dumpall` from the DB container, so the app never needs direct access
+   to the live Postgres data files). Only the `custom-app-dawarich-app-1` container
+   publishes a host port (`30081` -> container `3000`), matching the
+   `dawarich-service` in the Traefik dynamic config above. Resource limits are
+   right-sized for a **2-user household**: `shm_size` cut to 256M, app memory
+   ceiling 2G, Redis capped at 64M with LRU eviction, one Puma worker / 3 Rails
+   threads, and 2 Sidekiq threads. Raise `WEB_CONCURRENCY`, `RAILS_MAX_THREADS`,
+   `BACKGROUND_PROCESSING_CONCURRENCY`, and the `mem_limit`s if you add users or
+   notice slow large imports.
+
+   ```yaml
+   services:
+     dawarich_db:
+       image: postgis/postgis:17-3.5-alpine # https://github.com/postgis/docker-postgis/releases
+       container_name: custom-app-dawarich-db-1
+       restart: always
+       # 256M is plenty for a 2-user instance; the upstream 1G default is sized
+       # for many concurrent PostGIS queries.
+       shm_size: 256M
+       environment:
+         POSTGRES_USER: dawarich
+         POSTGRES_PASSWORD: <POSTGRES_PASSWORD>
+         POSTGRES_DB: dawarich_production
+       volumes:
+         - /mnt/ssd-storage/apps-data/dawarich/db:/var/lib/postgresql/data
+         - /mnt/ssd-storage/apps-data/dawarich/shared:/var/shared
+       healthcheck:
+         test: ["CMD-SHELL", "pg_isready -U dawarich -d dawarich_production"]
+         interval: 10s
+         retries: 5
+         start_period: 30s
+         timeout: 10s
+       security_opt: ["no-new-privileges:true"]
+       mem_limit: 1g
+       pids_limit: 100
+
+     dawarich_redis:
+       image: redis:7.4-alpine
+       container_name: custom-app-dawarich-redis-1
+       restart: always
+       # Cap the cache so Redis never grows unbounded; it holds cache + job
+       # queue + websocket state, all small for 2 users. NB: keep these inside
+       # the folded `>` scalar below — a `#` inside it is NOT a comment, it would
+       # be passed to redis-server as a literal arg, so the notes live here above
+       # `command:` instead.
+       command: >
+         redis-server
+         --save 900 1
+         --save 300 10
+         --appendonly no
+         --maxmemory 64mb
+         --maxmemory-policy allkeys-lru
+       volumes:
+         - /mnt/ssd-storage/apps-data/dawarich/redis:/data
+       healthcheck:
+         test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+         interval: 10s
+         retries: 5
+         start_period: 30s
+         timeout: 10s
+       security_opt: ["no-new-privileges:true"]
+       mem_limit: 128m
+       pids_limit: 100
+
+     dawarich_app:
+       image: freikin/dawarich:1.10.3 # https://github.com/Freika/dawarich/releases
+       container_name: custom-app-dawarich-app-1
+       restart: unless-stopped
+       entrypoint: web-entrypoint.sh
+       command: ["bin/rails", "server", "-p", "3000", "-b", "::"]
+       environment:
+         RAILS_ENV: production
+         # Run the Rails process as a non-root user (do NOT use `user:`).
+         PUID: "568"
+         PGID: "568"
+         REDIS_URL: redis://dawarich_redis:6379
+         DATABASE_HOST: dawarich_db
+         DATABASE_PORT: "5432"
+         DATABASE_USERNAME: dawarich
+         DATABASE_PASSWORD: <POSTGRES_PASSWORD>
+         DATABASE_NAME: dawarich_production
+         APPLICATION_HOSTS: YOUR_DAWARICH_DOMAIN
+         # http (not https) behind Traefik: the proxy terminates TLS, and this
+         # avoids Rails force_ssl 301-redirecting the healthcheck's plain-HTTP
+         # wget to https://127.0.0.1:3000, which would break the healthcheck
+         # (Puma is plain HTTP). Email links are hardcoded https since 1.7.6.
+         APPLICATION_PROTOCOL: http
+         TIME_ZONE: Europe/Berlin
+         SECRET_KEY_BASE: <SECRET_KEY_BASE>
+         SELF_HOSTED: "true"
+         STORE_GEODATA: "true"
+         # Tuned for a 2-user household: one Puma worker + 3 threads keeps
+         # idle memory and the DB connection pool small. Raise WEB_CONCURRENCY
+         # / RAILS_MAX_THREADS (and the app mem_limit) for busier instances.
+         WEB_CONCURRENCY: "1"
+         RAILS_MAX_THREADS: "3"
+         RAILS_LOG_TO_STDOUT: "true"
+         # SMTP for password reset, year-end digests, and family invitations.
+         # STARTTLS on 587 by default; set SMTP_STARTTLS=false only for plain
+         # SMTP on port 25 to a trusted local relay. DOMAIN is the bare public
+         # hostname (no protocol/slash) used to build links in outgoing mail.
+         DOMAIN: YOUR_DAWARICH_DOMAIN
+         SMTP_SERVER: my-smtp-server
+         SMTP_PORT: "587"
+         SMTP_USERNAME: <username-for-smtp>
+         SMTP_PASSWORD: <password-for-smtp>
+         SMTP_FROM: <dawarich@mydomain.com>
+         SMTP_AUTHENTICATION: plain
+         SMTP_STARTTLS: "true"
+       ports:
+         - "30081:3000"
+       volumes:
+         - /mnt/ssd-storage/apps-data/dawarich/public:/var/app/public
+         - /mnt/ssd-storage/apps-data/dawarich/watched:/var/app/tmp/imports/watched
+         - /mnt/ssd-storage/apps-data/dawarich/storage:/var/app/storage
+       depends_on:
+         dawarich_db:
+           condition: service_healthy
+           restart: true
+         dawarich_redis:
+           condition: service_healthy
+           restart: true
+       security_opt: ["no-new-privileges:true"]
+       mem_limit: 2g
+       pids_limit: 200
+       healthcheck:
+         test: ["CMD-SHELL", "wget -qO - http://127.0.0.1:3000/api/v1/health | grep -q '"status"\\s*:\\s*"ok"'"]
+         interval: 10s
+         retries: 30
+         start_period: 30s
+         timeout: 10s
+
+     dawarich_sidekiq:
+       image: freikin/dawarich:1.10.3
+       container_name: custom-app-dawarich-sidekiq-1
+       restart: unless-stopped
+       entrypoint: sidekiq-entrypoint.sh
+       command: ["sidekiq"]
+       environment:
+         RAILS_ENV: production
+         PUID: "568"
+         PGID: "568"
+         REDIS_URL: redis://dawarich_redis:6379
+         DATABASE_HOST: dawarich_db
+         DATABASE_PORT: "5432"
+         DATABASE_USERNAME: dawarich
+         DATABASE_PASSWORD: <POSTGRES_PASSWORD>
+         DATABASE_NAME: dawarich_production
+         APPLICATION_HOSTS: YOUR_DAWARICH_DOMAIN
+         # 2 job threads for a 2-user instance: each holds a DB connection, so
+         # this bounds steady-state memory. Bump temporarily for large imports.
+         BACKGROUND_PROCESSING_CONCURRENCY: "2"
+         RAILS_MAX_THREADS: "3"
+         # http behind Traefik — see dawarich_app above.
+         APPLICATION_PROTOCOL: http
+         SECRET_KEY_BASE: <SECRET_KEY_BASE>
+         SELF_HOSTED: "true"
+         STORE_GEODATA: "true"
+         RAILS_LOG_TO_STDOUT: "true"
+         # SMTP must be set on BOTH app and sidekiq — the Sidekiq container is
+         # the one that actually delivers the mail. Keep these in sync with
+         # dawarich_app above.
+         DOMAIN: YOUR_DAWARICH_DOMAIN
+         SMTP_SERVER: my-smtp-server
+         SMTP_PORT: "587"
+         SMTP_USERNAME: <username-for-smtp>
+         SMTP_PASSWORD: <password-for-smtp>
+         SMTP_FROM: <dawarich@mydomain.com>
+         SMTP_AUTHENTICATION: plain
+         SMTP_STARTTLS: "true"
+       volumes:
+         - /mnt/ssd-storage/apps-data/dawarich/public:/var/app/public
+         - /mnt/ssd-storage/apps-data/dawarich/watched:/var/app/tmp/imports/watched
+         - /mnt/ssd-storage/apps-data/dawarich/storage:/var/app/storage
+       depends_on:
+         dawarich_db:
+           condition: service_healthy
+           restart: true
+         dawarich_redis:
+           condition: service_healthy
+           restart: true
+         dawarich_app:
+           condition: service_healthy
+           restart: true
+       security_opt: ["no-new-privileges:true"]
+       mem_limit: 1g
+       pids_limit: 200
+       healthcheck:
+         test: ["CMD-SHELL", "pgrep -f sidekiq"]
+         interval: 10s
+         retries: 30
+         start_period: 30s
+         timeout: 10s
+   ```
+
+4. **Fill in the secrets directly in the YAML.** The "Install via YAML" editor
+   takes only the compose file, no env-var table, no `.env`, so before pasting
+   replace every `<POSTGRES_PASSWORD>` (there are three: `custom-app-dawarich-db-1`,
+   `custom-app-dawarich-app-1`, and `custom-app-dawarich-sidekiq-1`) and
+   `<SECRET_KEY_BASE>` (two: `custom-app-dawarich-app-1` and
+   `custom-app-dawarich-sidekiq-1`) with the values generated above. Also fill
+   in the SMTP placeholders (`<username-for-smtp>`, `<password-for-smtp>`,
+   `<dawarich@mydomain.com>`) on **both** `dawarich_app` and `dawarich_sidekiq` —
+   Sidekiq is the container that actually delivers the mail, so missing it there
+   breaks password resets and invitation emails.
+
+5. Click **Install** and watch the **Containers** tab until all four services
+   are healthy. The app container's `start_period` is generous because the
+   initial Rails DB migration can take a while on first boot.
+
+##### DNS and port forwarding
+
+- DNS: create a static `CNAME` `YOUR_DAWARICH_DOMAIN` -> `YOUR_ANCHOR_DOMAIN`
+  (unproxied), per the DNS model section. No `ddns-updater` entry needed.
+- Router: no new port to open. Dawarich reuses the existing `websecure`
+  entrypoint (`35000`); Traefik routes it by `Host` header and obtains the
+  certificate over the DNS challenge.
+
+##### First-run setup
+
+Open `https://YOUR_DAWARICH_DOMAIN:35000/` and **immediately** change the
+default admin credentials. The stock image ships with a seeded admin account
+(`demo@dawarich.app` / `safepassword`) — log in with it once, then:
+
+- Change the admin email and password in **Settings**.
+- Disable public self-registration unless you want anyone who reaches the
+  domain to sign up.
+- Point your tracking clients (OwnTracks, Overland, Dawarich iOS/Android) at
+  the instance using the per-user API key generated under **Settings**.
+
+Security notes:
+
+- Keep `SECRET_KEY_BASE` and `POSTGRES_PASSWORD` fixed and backed up; rotating
+  `SECRET_KEY_BASE` invalidates all existing sessions.
+- TLS is terminated by Traefik; `APPLICATION_PROTOCOL: http` lets the app run
+  plain HTTP internally while Traefik handles HTTPS, and `APPLICATION_HOSTS:
+  YOUR_DAWARICH_DOMAIN` makes generated links and API callbacks use the correct
+  public origin. Email links are hardcoded to `https://` since Dawarich 1.7.6.
+- SMTP is required for password reset, year-end digests, and family
+  invitations. The same SMTP block is set on both `dawarich_app` and
+  `dawarich_sidekiq` (Sidekiq performs the delivery); keep them in sync. Email
+  links are hardcoded to `https://` since Dawarich 1.7.6, so they are correct
+  behind this Traefik/TLS setup with no extra initializer.
+- Back up the PostgreSQL cluster with `pg_dumpall` (covered by the
+  snapshot/replication tasks below), and the `public/`, `watched/`, and
+  `storage/` directories are covered by the same dataset snapshots.
+
 ### Data Protection
 
 Three tiers give a 3-2-1 result (live data -> local ZFS replica -> offsite S3):
@@ -995,10 +1313,11 @@ Three tiers give a 3-2-1 result (live data -> local ZFS replica -> offsite S3):
 
 #### Application data backups
 
-All three apps (DoTheSplit, Memos, Vikunja) use **SQLite**. The DB must be
-**dumped, not file-copied**, a live SQLite file copied mid-write can be
-inconsistent. A daily cron dumps each app into a restic-backed directory, so the
-existing restic -> S3 job carries them offsite (no second mechanism).
+DoTheSplit, Memos, and Vikunja use **SQLite**; Dawarich uses **PostgreSQL**.
+In both cases the DB must be **dumped, not file-copied** — a live DB file copied
+mid-write can be inconsistent. A daily cron dumps each app into a
+restic-backed directory, so the existing restic -> S3 job carries them offsite
+(no second mechanism).
 
 The dumps live in their own datastore so they snapshot/replicate independently
 of personal media. Create it once (**Datasets > Add Dataset**), child of the
