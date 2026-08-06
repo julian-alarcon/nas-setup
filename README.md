@@ -997,66 +997,44 @@ Security notes:
 
 [https://dawarich.app](https://dawarich.app)
 
-Self-hosted location-history / GPS-tracking app (a Google Timeline
-alternative). Unlike the other apps in this guide it uses **PostgreSQL/PostGIS**
-plus **Redis**, so the Custom App runs four containers: `custom-app-dawarich-db-1`,
-`custom-app-dawarich-redis-1`, `custom-app-dawarich-app-1`, and
-`custom-app-dawarich-sidekiq-1`. Published through
-Traefik at `https://YOUR_DAWARICH_DOMAIN:35000/` on the shared `websecure`
-entrypoint.
+Self-hosted location-history / GPS-tracking app (Google Timeline alternative).
+Uses PostgreSQL/PostGIS plus Redis (four containers). Published through Traefik
+at `https://YOUR_DAWARICH_DOMAIN:35000/`.
 
 Datasets:
 
 - `ssd-storage/apps-data/dawarich` (Dataset Preset: `Apps`)
 
-The Dawarich app containers run as a **non-root user** via the image's
-`PUID`/`PGID` support (do **not** use the compose `user:` directive with this
-image — the entrypoint needs root to set up the UID before dropping
-privileges). We reuse the `Apps` preset UID/GID **568**. PostgreSQL and Redis
-manage their own privilege dropping internally, so only the app-writable
-directories need a manual `chown`:
+The app runs non-root via the image's `PUID`/`PGID` support (do not use
+compose `user:`). PostgreSQL and Redis manage their own privilege dropping.
+Only the app-writable dirs need a manual `chown` (not `db`, which the Postgres
+entrypoint fixes itself):
 
 ```sh
 mkdir -p /mnt/ssd-storage/apps-data/dawarich/{db,shared,redis,public,watched,storage}
 chown -R 568:568 /mnt/ssd-storage/apps-data/dawarich/{public,watched,storage}
 ```
 
-> [!NOTE]
-> Do **not** `chown` the `db` directory. The `postgis/postgis` entrypoint runs
-> as root, fixes `PGDATA` ownership to its internal `postgres` user, then drops
-> privileges. Pre-owning it to 568 would make the entrypoint fail.
-
 ##### Generate the service secrets
-
-Run once and store the output in a password manager **before** continuing.
-`SECRET_KEY_BASE` signs/encrypts Rails sessions and cookies — losing it after
-the database has data invalidates all sessions; `POSTGRES_PASSWORD` is the
-PostgreSQL credentials the app and Sidekiq use to connect to the DB.
 
 ```sh
 echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)"
 echo "SECRET_KEY_BASE=$(openssl rand -hex 64)"
 ```
 
+Store both in a password manager. `SECRET_KEY_BASE` signs Rails sessions;
+rotating it invalidates all sessions.
+
 ##### Install the Custom App
 
 1. **Apps -> Discover Apps -> Custom App**.
 2. **Application Name**: `custom-app-dawarich`.
-3. **Install via custom YAML**: paste the compose below. It is adapted from the
-   [official compose](https://github.com/Freika/dawarich/blob/master/docker/docker-compose.yml)
-   with the following NAS-specific changes: named volumes replaced by bind
-   mounts under `/mnt/ssd-storage/apps-data/dawarich`; image pinned to `1.10.3`
-   (not `:latest`); `PUID`/`PGID` set so the app runs as non-root `568`; the
-   `dawarich_db_data` mount on the app container is omitted (backups are taken
-   with `pg_dumpall` from the DB container, so the app never needs direct access
-   to the live Postgres data files). Only the `custom-app-dawarich-app-1` container
-   publishes a host port (`30081` -> container `3000`), matching the
-   `dawarich-service` in the Traefik dynamic config above. Resource limits are
-   right-sized for a **2-user household**: `shm_size` cut to 256M, app memory
-   ceiling 2G, Redis capped at 64M with LRU eviction, one Puma worker / 3 Rails
-   threads, and 2 Sidekiq threads. Raise `WEB_CONCURRENCY`, `RAILS_MAX_THREADS`,
-   `BACKGROUND_PROCESSING_CONCURRENCY`, and the `mem_limit`s if you add users or
-   notice slow large imports.
+3. **Install via custom YAML**: paste the compose below, adapted from the
+   [official compose](https://github.com/Freika/dawarich/blob/master/docker/docker-compose.yml):
+   named volumes replaced by bind mounts; image pinned to `1.11.0` (not
+   `:latest`); `PUID`/`PGID` set to `568`; resource limits sized for a 2-user
+   household. Only `dawarich_app` publishes a host port (`30081` -> `3000`),
+   matching the `dawarich-service` in the Traefik dynamic config.
 
    ```yaml
    services:
@@ -1064,12 +1042,10 @@ echo "SECRET_KEY_BASE=$(openssl rand -hex 64)"
        image: postgis/postgis:17-3.5-alpine # https://github.com/postgis/docker-postgis/releases
        container_name: custom-app-dawarich-db-1
        restart: always
-       # 256M is plenty for a 2-user instance; the upstream 1G default is sized
-       # for many concurrent PostGIS queries.
        shm_size: 256M
        environment:
          POSTGRES_USER: dawarich
-         POSTGRES_PASSWORD: <POSTGRES_PASSWORD>
+         POSTGRES_PASSWORD: "<POSTGRES_PASSWORD>"
          POSTGRES_DB: dawarich_production
        volumes:
          - /mnt/ssd-storage/apps-data/dawarich/db:/var/lib/postgresql/data
@@ -1088,11 +1064,8 @@ echo "SECRET_KEY_BASE=$(openssl rand -hex 64)"
        image: redis:7.4-alpine
        container_name: custom-app-dawarich-redis-1
        restart: always
-       # Cap the cache so Redis never grows unbounded; it holds cache + job
-       # queue + websocket state, all small for 2 users. NB: keep these inside
-       # the folded `>` scalar below — a `#` inside it is NOT a comment, it would
-       # be passed to redis-server as a literal arg, so the notes live here above
-       # `command:` instead.
+       # NB: comments MUST stay above `command:`. A `#` inside the folded `>`
+       # scalar is NOT a comment, it is passed to redis-server as a literal arg.
        command: >
          redis-server
          --save 900 1
@@ -1113,50 +1086,45 @@ echo "SECRET_KEY_BASE=$(openssl rand -hex 64)"
        pids_limit: 100
 
      dawarich_app:
-       image: freikin/dawarich:1.10.3 # https://github.com/Freika/dawarich/releases
+       image: freikin/dawarich:1.11.0 # https://github.com/Freika/dawarich/releases
        container_name: custom-app-dawarich-app-1
        restart: unless-stopped
        entrypoint: web-entrypoint.sh
        command: ["bin/rails", "server", "-p", "3000", "-b", "::"]
        environment:
          RAILS_ENV: production
-         # Run the Rails process as a non-root user (do NOT use `user:`).
          PUID: "568"
          PGID: "568"
          REDIS_URL: redis://dawarich_redis:6379
          DATABASE_HOST: dawarich_db
          DATABASE_PORT: "5432"
          DATABASE_USERNAME: dawarich
-         DATABASE_PASSWORD: <POSTGRES_PASSWORD>
+         DATABASE_PASSWORD: "<POSTGRES_PASSWORD>"
          DATABASE_NAME: dawarich_production
          APPLICATION_HOSTS: YOUR_DAWARICH_DOMAIN
-         # http (not https) behind Traefik: the proxy terminates TLS, and this
-         # avoids Rails force_ssl 301-redirecting the healthcheck's plain-HTTP
-         # wget to https://127.0.0.1:3000, which would break the healthcheck
-         # (Puma is plain HTTP). Email links are hardcoded https since 1.7.6.
+         # http (not https) behind Traefik: force_ssl would 301-redirect the
+         # healthcheck wget to https://127.0.0.1:3000 and break it.
          APPLICATION_PROTOCOL: http
          TIME_ZONE: Europe/Berlin
-         SECRET_KEY_BASE: <SECRET_KEY_BASE>
+         SECRET_KEY_BASE: "<SECRET_KEY_BASE>"
          SELF_HOSTED: "true"
          STORE_GEODATA: "true"
-         # Tuned for a 2-user household: one Puma worker + 3 threads keeps
-         # idle memory and the DB connection pool small. Raise WEB_CONCURRENCY
-         # / RAILS_MAX_THREADS (and the app mem_limit) for busier instances.
          WEB_CONCURRENCY: "1"
          RAILS_MAX_THREADS: "3"
          RAILS_LOG_TO_STDOUT: "true"
-         # SMTP for password reset, year-end digests, and family invitations.
-         # STARTTLS on 587 by default; set SMTP_STARTTLS=false only for plain
-         # SMTP on port 25 to a trusted local relay. DOMAIN is the bare public
-         # hostname (no protocol/slash) used to build links in outgoing mail.
          DOMAIN: YOUR_DAWARICH_DOMAIN
          SMTP_SERVER: my-smtp-server
          SMTP_PORT: "587"
-         SMTP_USERNAME: <username-for-smtp>
-         SMTP_PASSWORD: <password-for-smtp>
-         SMTP_FROM: <dawarich@mydomain.com>
+         SMTP_USERNAME: "<username-for-smtp>"
+         SMTP_PASSWORD: "<password-for-smtp>"
+         SMTP_FROM: "<dawarich@mydomain.com>"
          SMTP_AUTHENTICATION: plain
          SMTP_STARTTLS: "true"
+         # Reverse geocoding via chibigeo (Photon-compatible, hosted by the
+         # Dawarich team). Sign up at chibigeo.com. Remove to disable.
+         PHOTON_API_HOST: app.chibigeo.com/v1/photon
+         PHOTON_API_KEY: "<CHIBIGEO_API_KEY>"
+         PHOTON_API_USE_HTTPS: "true"
        ports:
          - "30081:3000"
        volumes:
@@ -1181,7 +1149,7 @@ echo "SECRET_KEY_BASE=$(openssl rand -hex 64)"
          timeout: 10s
 
      dawarich_sidekiq:
-       image: freikin/dawarich:1.10.3
+       image: freikin/dawarich:1.11.0
        container_name: custom-app-dawarich-sidekiq-1
        restart: unless-stopped
        entrypoint: sidekiq-entrypoint.sh
@@ -1194,30 +1162,29 @@ echo "SECRET_KEY_BASE=$(openssl rand -hex 64)"
          DATABASE_HOST: dawarich_db
          DATABASE_PORT: "5432"
          DATABASE_USERNAME: dawarich
-         DATABASE_PASSWORD: <POSTGRES_PASSWORD>
+         DATABASE_PASSWORD: "<POSTGRES_PASSWORD>"
          DATABASE_NAME: dawarich_production
          APPLICATION_HOSTS: YOUR_DAWARICH_DOMAIN
-         # 2 job threads for a 2-user instance: each holds a DB connection, so
-         # this bounds steady-state memory. Bump temporarily for large imports.
          BACKGROUND_PROCESSING_CONCURRENCY: "2"
          RAILS_MAX_THREADS: "3"
-         # http behind Traefik — see dawarich_app above.
          APPLICATION_PROTOCOL: http
-         SECRET_KEY_BASE: <SECRET_KEY_BASE>
+         SECRET_KEY_BASE: "<SECRET_KEY_BASE>"
          SELF_HOSTED: "true"
          STORE_GEODATA: "true"
          RAILS_LOG_TO_STDOUT: "true"
-         # SMTP must be set on BOTH app and sidekiq — the Sidekiq container is
-         # the one that actually delivers the mail. Keep these in sync with
-         # dawarich_app above.
+         # SMTP and reverse-geocoding env must match dawarich_app (Sidekiq
+         # delivers mail and runs geocoding jobs).
          DOMAIN: YOUR_DAWARICH_DOMAIN
          SMTP_SERVER: my-smtp-server
          SMTP_PORT: "587"
-         SMTP_USERNAME: <username-for-smtp>
-         SMTP_PASSWORD: <password-for-smtp>
-         SMTP_FROM: <dawarich@mydomain.com>
+         SMTP_USERNAME: "<username-for-smtp>"
+         SMTP_PASSWORD: "<password-for-smtp>"
+         SMTP_FROM: "<dawarich@mydomain.com>"
          SMTP_AUTHENTICATION: plain
          SMTP_STARTTLS: "true"
+         PHOTON_API_HOST: app.chibigeo.com/v1/photon
+         PHOTON_API_KEY: "<CHIBIGEO_API_KEY>"
+         PHOTON_API_USE_HTTPS: "true"
        volumes:
          - /mnt/ssd-storage/apps-data/dawarich/public:/var/app/public
          - /mnt/ssd-storage/apps-data/dawarich/watched:/var/app/tmp/imports/watched
@@ -1243,57 +1210,33 @@ echo "SECRET_KEY_BASE=$(openssl rand -hex 64)"
          timeout: 10s
    ```
 
-4. **Fill in the secrets directly in the YAML.** The "Install via YAML" editor
-   takes only the compose file, no env-var table, no `.env`, so before pasting
-   replace every `<POSTGRES_PASSWORD>` (there are three: `custom-app-dawarich-db-1`,
-   `custom-app-dawarich-app-1`, and `custom-app-dawarich-sidekiq-1`) and
-   `<SECRET_KEY_BASE>` (two: `custom-app-dawarich-app-1` and
-   `custom-app-dawarich-sidekiq-1`) with the values generated above. Also fill
-   in the SMTP placeholders (`<username-for-smtp>`, `<password-for-smtp>`,
-   `<dawarich@mydomain.com>`) on **both** `dawarich_app` and `dawarich_sidekiq` —
-   Sidekiq is the container that actually delivers the mail, so missing it there
-   breaks password resets and invitation emails.
+4. **Fill in the placeholders.** The YAML editor takes no `.env`, so replace
+   all `"<POSTGRES_PASSWORD>"` (3x), `"<SECRET_KEY_BASE>"` (2x), SMTP
+   placeholders (2x each), and `"<CHIBIGEO_API_KEY>"` (2x) with real values
+   before pasting. Keep the double quotes.
 
 5. Click **Install** and watch the **Containers** tab until all four services
-   are healthy. The app container's `start_period` is generous because the
-   initial Rails DB migration can take a while on first boot.
+   are healthy. First-boot Rails migrations can take a few minutes.
 
 ##### DNS and port forwarding
 
-- DNS: create a static `CNAME` `YOUR_DAWARICH_DOMAIN` -> `YOUR_ANCHOR_DOMAIN`
-  (unproxied), per the DNS model section. No `ddns-updater` entry needed.
-- Router: no new port to open. Dawarich reuses the existing `websecure`
-  entrypoint (`35000`); Traefik routes it by `Host` header and obtains the
-  certificate over the DNS challenge.
+- DNS: `YOUR_DAWARICH_DOMAIN` is a static CNAME -> `YOUR_ANCHOR_DOMAIN`.
+- Router: no new port. Dawarich reuses `websecure` (`35000`); Traefik routes by
+  `Host` header and obtains the certificate over the DNS challenge.
 
 ##### First-run setup
 
-Open `https://YOUR_DAWARICH_DOMAIN:35000/` and **immediately** change the
-default admin credentials. The stock image ships with a seeded admin account
-(`demo@dawarich.app` / `safepassword`) — log in with it once, then:
+Log in at `https://YOUR_DAWARICH_DOMAIN:35000/` with the seeded admin
+(`demo@dawarich.app` / `safepassword`) and change it immediately. Then:
 
 - Change the admin email and password in **Settings**.
-- Disable public self-registration unless you want anyone who reaches the
-  domain to sign up.
-- Point your tracking clients (OwnTracks, Overland, Dawarich iOS/Android) at
-  the instance using the per-user API key generated under **Settings**.
-
-Security notes:
-
-- Keep `SECRET_KEY_BASE` and `POSTGRES_PASSWORD` fixed and backed up; rotating
-  `SECRET_KEY_BASE` invalidates all existing sessions.
-- TLS is terminated by Traefik; `APPLICATION_PROTOCOL: http` lets the app run
-  plain HTTP internally while Traefik handles HTTPS, and `APPLICATION_HOSTS:
-  YOUR_DAWARICH_DOMAIN` makes generated links and API callbacks use the correct
-  public origin. Email links are hardcoded to `https://` since Dawarich 1.7.6.
-- SMTP is required for password reset, year-end digests, and family
-  invitations. The same SMTP block is set on both `dawarich_app` and
-  `dawarich_sidekiq` (Sidekiq performs the delivery); keep them in sync. Email
-  links are hardcoded to `https://` since Dawarich 1.7.6, so they are correct
-  behind this Traefik/TLS setup with no extra initializer.
-- Back up the PostgreSQL cluster with `pg_dumpall` (covered by the
-  snapshot/replication tasks below), and the `public/`, `watched/`, and
-  `storage/` directories are covered by the same dataset snapshots.
+- Disable public self-registration.
+- Point tracking clients (OwnTracks, Overland, Dawarich iOS/Android) at the
+  instance using the per-user API key under **Settings**.
+- SMTP is set on both app and sidekiq (Sidekiq delivers mail). Email links are
+  hardcoded to `https://` since Dawarich 1.7.6.
+- Back up the PostgreSQL cluster with `pg_dumpall` (covered below); the
+  `public/`, `watched/`, and `storage/` dirs are covered by dataset snapshots.
 
 ### Data Protection
 
@@ -1314,7 +1257,7 @@ Three tiers give a 3-2-1 result (live data -> local ZFS replica -> offsite S3):
 #### Application data backups
 
 DoTheSplit, Memos, and Vikunja use **SQLite**; Dawarich uses **PostgreSQL**.
-In both cases the DB must be **dumped, not file-copied** — a live DB file copied
+In both cases the DB must be **dumped, not file-copied**: a live DB file copied
 mid-write can be inconsistent. A daily cron dumps each app into a
 restic-backed directory, so the existing restic -> S3 job carries them offsite
 (no second mechanism).
