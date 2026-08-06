@@ -167,6 +167,9 @@ Select as Dataset Preset `Apps`
 
 ### Applications setup
 
+Each app's full compose/config file lives under [`config/`](config/) and is
+linked from its section below. Commands and short snippets stay inline.
+
 #### Jellyfin
 
 Install from Applications (`community`)
@@ -247,39 +250,8 @@ Dashboard -> Scheduled tasks -> Download missing subtitles
 
 Dataset: `ssd-storage/apps-data/gluetun`
 
-Set new custom app with name `custom-app-gluetun`, paste the docker-compose setup below:
-
-```yaml
-# Source: https://forums.truenas.com/t/guide-how-to-install-qbittorrent-or-any-app-with-vpn-on-truenas-electric-eel/12677
-# Configuration https://github.com/qdm12/gluetun-wiki
-name: gluetun
-services:
-  gluetun:
-    image: qmcgaw/gluetun:v3 # https://hub.docker.com/r/qmcgaw/gluetun/tags
-    restart: always
-    container_name: custom-app-gluetun-1
-    cap_add:
-      - NET_ADMIN
-    ports:
-      - 8888:8888/tcp # HTTP proxy
-      - 8388:8388/tcp # Shadowsocks
-      - 8388:8388/udp # Shadowsocks
-      - 8080:8080 # qbittorrent webui
-      - 6881:6881 # qbittorrent
-      - 6881:6881/udp # qbittorrent
-    volumes:
-      - /mnt/ssd-storage/apps-data/gluetun:/gluetun
-    environment:
-      - VPN_TYPE=wireguard
-      - VPN_SERVICE_PROVIDER=protonvpn
-      - WIREGUARD_PRIVATE_KEY=WIRGUARD_PRIVATE_KEY
-      - SERVER_COUNTRIES=Switzerland
-      - PORT_FORWARD_ONLY
-      - UPDATER_PERIOD=24h
-      - VPN_PORT_FORWARDING=on
-      - VPN_PORT_FORWARDING_PROVIDER=protonvpn
-      - FIREWALL_VPN_INPUT_PORTS=6881
-```
+Set new custom app with name `custom-app-gluetun`. Install via custom YAML
+using [`config/qbittorrent/gluetun-compose.yml`](config/qbittorrent/gluetun-compose.yml).
 
 ##### qBittorrent app
 
@@ -287,30 +259,8 @@ Dataset:
 
 - `ssd-storage/apps-data/qbittorrent`
 
-Set new custom app with name `custom-app-qbittorrent`, paste the docker-compose
-setup below:
-
-```yaml
-# Source: https://forums.truenas.com/t/guide-how-to-install-qbittorrent-or-any-app-with-vpn-on-truenas-electric-eel/12677
-# Configuration https://docs.linuxserver.io/images/docker-qbittorrent
-name: qbittorrent
-services:
-  qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:5.2.1 # https://gitlab.com/Linuxserver.io/docker-qbittorrent/container_registry/774438
-    restart: always
-    container_name: custom-app-qbittorrent-1
-    environment:
-      - PUID=568 # Linux User ID for user: apps
-      - PGID=568 # Linux User ID for group: apps
-      - TZ=Europe/Berlin
-      - WEBUI_PORT=8080
-      - TORRENTING_PORT=6881
-    volumes:
-      - /mnt/ssd-storage/apps-data/qbittorrent/config:/config #Directory you want to save your qbit config files
-      - /mnt/backup-and-downloads/movies-series:/media #movies/series/music directory
-    network_mode: container:custom-app-gluetun-1 #this is what makes the app to connect to the VPN.
-    # Note that all ports were moved to the gluetun app.
-```
+Set new custom app with name `custom-app-qbittorrent`. Install via custom YAML
+using [`config/qbittorrent/qbittorrent-compose.yml`](config/qbittorrent/qbittorrent-compose.yml).
 
 ##### qBittorrent Web UI settings
 
@@ -413,202 +363,14 @@ chmod 700 /mnt/ssd-storage/apps-data/traefik/letsencrypt
 ```
 
 Add configuration to file `/mnt/ssd-storage/apps-data/traefik/traefik_dynamic.yml`
-
-```yaml
-# TLS hardening applied to every router via the default options.
-# TLS 1.3 only: cipher suites are fixed by the spec, so no cipherSuites
-# tuning is needed (it would be ignored). Ensure all clients support TLS 1.3.
-tls:
-  options:
-    default:
-      minVersion: VersionTLS13
-      sniStrict: true
-
-http:
-  routers:
-    immich:
-      rule: "Host(`YOUR_IMMICH_DOMAIN`) && PathPrefix(`/immich`)"
-      service: immich-service
-      entryPoints:
-        - websecure
-      tls:
-        certResolver: myresolver
-      middlewares:
-        - security-headers
-        - compress
-
-    jellyfin:
-      rule: "Host(`YOUR_JELLYFIN_DOMAIN`) && PathPrefix(`/jellyfin`)"
-      service: jellyfin-service
-      entryPoints:
-        - websecure
-      tls:
-        certResolver: myresolver
-      middlewares:
-        - security-headers
-        - strip-jellyfin-prefix
-
-    dothesplit:
-      rule: "Host(`YOUR_DOTHESPLIT_DOMAIN`)"
-      service: dothesplit-service
-      entryPoints:
-        - websecure
-      tls:
-        certResolver: myresolver
-      middlewares:
-        - security-headers
-        - compress
-
-    # Memos runs on its own subdomain (it does not support a URL sub-path
-    # reliably: its frontend uses absolute asset paths).
-    memos:
-      rule: "Host(`YOUR_MEMOS_DOMAIN`)"
-      service: memos-service
-      entryPoints:
-        - websecure
-      tls:
-        certResolver: myresolver
-      middlewares:
-        - security-headers
-        - compress
-
-    vikunja:
-      rule: "Host(`YOUR_VIKUNJA_DOMAIN`)"
-      service: vikunja-service
-      entryPoints:
-        - websecure
-      tls:
-        certResolver: myresolver
-      middlewares:
-        - security-headers
-        - compress
-
-    dawarich:
-      rule: "Host(`YOUR_DAWARICH_DOMAIN`)"
-      service: dawarich-service
-      entryPoints:
-        - websecure
-      tls:
-        certResolver: myresolver
-      middlewares:
-        - security-headers
-        - compress
-
-    # Traefik dashboard. LAN-only + basicAuth;  reachable only from
-    # the LAN
-    dashboard:
-      rule: "PathPrefix(`/dashboard`) || PathPrefix(`/api`)"
-      service: api@internal # Traefik's built-in dashboard/API service
-      entryPoints:
-        - dashboard
-      middlewares:
-        - dashboard-auth
-
-  middlewares:
-    # gzip/brotli/zstd for text responses (HTML/JS/CSS/JSON). Traefik negotiates
-    # the best algorithm per client and skips already-compressed media types,
-    # so it is applied only to the web UIs (not jellyfin's media streams).
-    compress:
-      compress: {}
-
-    strip-jellyfin-prefix:
-      stripPrefix:
-        prefixes:
-          - "/jellyfin"
-
-    # HSTS + common hardening headers for all public routers.
-    security-headers:
-      headers:
-        stsSeconds: 31536000
-        stsIncludeSubdomains: true
-        stsPreload: true
-        frameDeny: true
-        contentTypeNosniff: true
-        browserXssFilter: true
-        referrerPolicy: strict-origin-when-cross-origin
-
-    # basicAuth for the dashboard. Generate the hash with:
-    #   htpasswd -nbB admin 'YOUR_STRONG_PASSWORD'
-    # In a YAML file the hash is written literally (no `$$` escaping).
-    dashboard-auth:
-      basicAuth:
-        users:
-          - "admin:$2y$05$REPLACE_WITH_YOUR_BCRYPT_HASH"
-
-  services:
-    jellyfin-service:
-      loadBalancer:
-        servers:
-          - url: "http://192.168.1.200:30013"
-
-    immich-service:
-      loadBalancer:
-        servers:
-          - url: "http://192.168.1.200:30041"
-
-    dothesplit-service:
-      loadBalancer:
-        servers:
-          - url: "http://192.168.1.200:30051"
-
-    memos-service:
-      loadBalancer:
-        servers:
-          - url: "http://192.168.1.200:30061"
-
-    vikunja-service:
-      loadBalancer:
-        servers:
-          - url: "http://192.168.1.200:30071"
-
-    dawarich-service:
-      loadBalancer:
-        servers:
-          - url: "http://192.168.1.200:30081"
-```
+(copy from [`config/traefik/traefik_dynamic.yml`](config/traefik/traefik_dynamic.yml) and fill in
+`YOUR_*` domains and the dashboard `basicAuth` hash):
 
 ##### Traefik app
 
-Set new custom app with name `custom-app-traefik` and paste the docker-compose
-setup below:
-
-```yaml
-name: traefik
-services:
-  reverse-proxy:
-    image: traefik:v3 # https://github.com/traefik/traefik/releases
-    restart: always
-    container_name: custom-app-traefik-1
-    command:
-      - "--log.level=INFO"
-      - "--accesslog=true"
-      # Dashboard served via api@internal on its own `dashboard` entrypoint
-      # (port 35001), bound to the `dashboard` router in the dynamic config.
-      - "--api.dashboard=true"
-      - "--providers.file.filename=/etc/traefik/traefik_dynamic.yml"
-      - "--entrypoints.websecure.address=:35000"
-      # Dashboard entrypoint: LAN-only. Do NOT port-forward 35001 on the router.
-      - "--entrypoints.dashboard.address=:35001"
-      - "--certificatesresolvers.myresolver.acme.email=letsencrypt@mail.desentropia.com" # Your email for Let's Encrypt notifications
-      - "--certificatesresolvers.myresolver.acme.storage=/etc/traefik/letsencrypt/acme.json" # Storage for certificates
-      - "--certificatesresolvers.myresolver.acme.dnschallenge=true"
-      - "--certificatesresolvers.myresolver.acme.dnschallenge.provider=YOUR_DNS_PROVIDER"
-      - "--certificatesresolvers.myresolver.acme.dnschallenge.resolvers=1.1.1.1:53,8.8.8.8:53"
-      # - "--certificatesresolvers.myresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory" # Use Let's Encrypt staging server
-      - "--certificatesresolvers.myresolver.acme.caserver=https://acme-v02.api.letsencrypt.org/directory" # Use Let's Encrypt production
-    environment:
-      - DNS_API_TOKEN=YOUR_DNS_API_TOKEN # Use the env vars your DNS provider expects
-    ports:
-      - "35000:35000" # Public entrypoint (port-forward this one)
-      - "35001:35001" # Dashboard entrypoint, LAN-only (do NOT port-forward)
-    volumes:
-      - /mnt/ssd-storage/apps-data/traefik:/etc/traefik/
-    read_only: true # acme.json is on the mounted volume, so the cert store stays writable
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=16m
-```
+Set new custom app with name `custom-app-traefik`. Install via custom YAML
+using [`config/traefik/compose.yml`](config/traefik/compose.yml). Fill in the
+`YOUR_DNS_PROVIDER`, `DNS_API_TOKEN`, and your Let's Encrypt email.
 
 Port forwarding: forward **only** port `35000` (the public entrypoint) on the
 router to the NAS IP.
@@ -727,48 +489,10 @@ echo "JWT_SIGNING_KEY=$(openssl rand -base64 32)"
 
 1. **Apps -> Discover Apps -> Custom App**.
 2. **Application Name**: `custom-app-dothesplit`.
-3. **Install via custom YAML**: paste the compose below. `COOKIE_SECURE` is
-   `true` and `WEB_ORIGIN` points at the public HTTPS URL because Traefik
-   terminates TLS in front of the app. The `:1` tag tracks the v1 major line; pin
-   an exact `:1.Y.Z` if you prefer manual upgrades. `read_only: true` keeps the
-   rootfs immutable; the SQLite DB is writable because it lives on the mounted
-   `/data` volume.
-
-   ```yaml
-   services:
-     dothesplit:
-       image: ghcr.io/julian-alarcon/dothesplit:1
-       restart: unless-stopped
-       container_name: custom-app-dothesplit-1
-       environment:
-         API_HTTP_ADDR: ":8080"
-         WEB_ORIGIN: "https://YOUR_DOTHESPLIT_DOMAIN:35000"
-         COOKIE_SECURE: "true"
-         DATABASE_DRIVER: sqlite
-         DATABASE_URL: "file:/data/dts.db"
-         EMAIL_ENC_KEY: "<EMAIL_ENC_KEY>"
-         EMAIL_HMAC_KEY: "<EMAIL_HMAC_KEY>"
-         PASSWORD_PEPPER: "<PASSWORD_PEPPER>"
-         JWT_SIGNING_KEY: "<JWT_SIGNING_KEY>"
-         TRUSTED_PROXIES: "192.168.1.200/32"
-         LOG_LEVEL: info
-       ports:
-         # The binary serves both /v1 and the embedded SPA.
-         - "30051:8080"
-       volumes:
-         - /mnt/ssd-storage/apps-data/dothesplit/data:/data
-       healthcheck:
-         test: ["CMD", "/dothesplit", "--healthcheck"]
-         interval: 10s
-         timeout: 3s
-         retries: 5
-         start_period: 10s
-       read_only: true
-       cap_drop: [ALL]
-       security_opt: ["no-new-privileges:true"]
-       tmpfs:
-         - /tmp:rw,noexec,nosuid,size=32m
-   ```
+3. **Install via custom YAML**: use the full config at
+   [`config/dothesplit/compose.yml`](config/dothesplit/compose.yml), filling in
+   the four secrets. `COOKIE_SECURE` is `true` and `WEB_ORIGIN` points at the
+   public HTTPS URL because Traefik terminates TLS in front of the app.
 
    The single container publishes a host port (`30051` -> container `8080`); it
    serves both `/v1` and the embedded client-side Vue SPA from one origin, so the
@@ -832,32 +556,10 @@ mounted directory's ownership itself. No manual `chown` is needed.
 
 1. **Apps -> Discover Apps -> Custom App**.
 2. **Application Name**: `custom-app-memos`.
-3. **Install via custom YAML**: paste the compose below. `MEMOS_DRIVER=sqlite`
+3. **Install via custom YAML**: use the full config at
+   [`config/memos/compose.yml`](config/memos/compose.yml). `MEMOS_DRIVER=sqlite`
    is the default, so no database container is needed. Only the `memos`
-   container publishes a host port (`30061` -> container `5230`), matching the
-   `memos-service` in the Traefik dynamic config above.
-
-   ```yaml
-   services:
-     memos:
-       image: neosmemo/memos:stable # https://github.com/usememos/memos/releases
-       restart: unless-stopped
-       container_name: custom-app-memos-1
-       environment:
-         - MEMOS_MODE=prod
-         - MEMOS_DRIVER=sqlite
-         - MEMOS_PORT=5230
-         # Public URL, required behind a reverse proxy.
-         - MEMOS_INSTANCE_URL=https://YOUR_MEMOS_DOMAIN:35000
-         - TZ=Europe/Berlin
-       ports:
-         - "30061:5230"
-       volumes:
-         - /mnt/ssd-storage/apps-data/memos:/var/opt/memos
-       security_opt: ["no-new-privileges:true"]
-       mem_limit: 256m
-       pids_limit: 100
-   ```
+   container publishes a host port (`30061` -> container `5230`).
 
 4. Click **Install** and watch the **Containers** tab until the service is
    healthy.
@@ -923,44 +625,10 @@ openssl rand -hex 32
 
 1. **Apps -> Discover Apps -> Custom App**.
 2. **Application Name**: `custom-app-vikunja`.
-3. **Install via custom YAML**: paste the compose below. `VIKUNJA_DATABASE_TYPE`
+3. **Install via custom YAML**: use the full config at
+   [`config/vikunja/compose.yml`](config/vikunja/compose.yml). `VIKUNJA_DATABASE_TYPE`
    is `sqlite`, so no database container is needed. Only the `vikunja` container
-   publishes a host port (`30071` -> container `3456`), matching the
-   `vikunja-service` in the Traefik dynamic config above.
-
-   ```yaml
-   services:
-     vikunja:
-       image: vikunja/vikunja:2 # https://github.com/go-vikunja/vikunja/releases
-       restart: unless-stopped
-       container_name: custom-app-vikunja-1
-       user: "568:568"
-       environment:
-         # Public URL, trailing slash required (api<->frontend communication).
-         - VIKUNJA_SERVICE_PUBLICURL=https://YOUR_VIKUNJA_DOMAIN:35000/
-         - VIKUNJA_SERVICE_SECRET=<VIKUNJA_SERVICE_SECRET>
-         - VIKUNJA_DATABASE_TYPE=sqlite
-         - VIKUNJA_DATABASE_PATH=/db/vikunja.db
-         # Lock the instance down: no self-registration (create users via admin).
-         - VIKUNJA_SERVICE_ENABLEREGISTRATION=false
-         - VIKUNJA_SERVICE_TIMEZONE=Europe/Berlin
-         # SMTP for notifications/password-reset. STARTTLS on 587 by default;
-         # set VIKUNJA_MAILER_FORCESSL=true only for implicit TLS on 465.
-         - VIKUNJA_MAILER_ENABLED=true
-         - VIKUNJA_MAILER_HOST=my-smtp-server
-         - VIKUNJA_MAILER_PORT=587
-         - VIKUNJA_MAILER_USERNAME=<username-for-smtp>
-         - VIKUNJA_MAILER_PASSWORD=<password-for-smtp>
-         - VIKUNJA_MAILER_FROMEMAIL=<vikunja@mydomain.com>
-       ports:
-         - "30071:3456"
-       volumes:
-         - /mnt/ssd-storage/apps-data/vikunja/db:/db
-         - /mnt/ssd-storage/apps-data/vikunja/files:/app/vikunja/files
-       security_opt: ["no-new-privileges:true"]
-       mem_limit: 512m
-       pids_limit: 200
-   ```
+   publishes a host port (`30071` -> container `3456`).
 
 4. Click **Install** and watch the **Containers** tab until the service is
    healthy.
@@ -1029,191 +697,22 @@ rotating it invalidates all sessions.
 
 1. **Apps -> Discover Apps -> Custom App**.
 2. **Application Name**: `custom-app-dawarich`.
-3. **Install via custom YAML**: paste the compose below, adapted from the
+3. **Install via custom YAML**: use
+   [`config/dawarich/compose.yml`](config/dawarich/compose.yml), adapted from the
    [official compose](https://github.com/Freika/dawarich/blob/master/docker/docker-compose.yml):
    named volumes replaced by bind mounts; image pinned to `1.11.0` (not
    `:latest`); `PUID`/`PGID` set to `568`; resource limits sized for a 2-user
-   household. Only `dawarich_app` publishes a host port (`30081` -> `3000`),
-   matching the `dawarich-service` in the Traefik dynamic config.
+   household. Only `dawarich_app` publishes a host port (`30081` -> container
+   `3000`), matching the `dawarich-service` in the Traefik dynamic config.
 
-   ```yaml
-   services:
-     dawarich_db:
-       image: postgis/postgis:17-3.5-alpine # https://github.com/postgis/docker-postgis/releases
-       container_name: custom-app-dawarich-db-1
-       restart: always
-       shm_size: 256M
-       environment:
-         POSTGRES_USER: dawarich
-         POSTGRES_PASSWORD: "<POSTGRES_PASSWORD>"
-         POSTGRES_DB: dawarich_production
-       volumes:
-         - /mnt/ssd-storage/apps-data/dawarich/db:/var/lib/postgresql/data
-         - /mnt/ssd-storage/apps-data/dawarich/shared:/var/shared
-       healthcheck:
-         test: ["CMD-SHELL", "pg_isready -U dawarich -d dawarich_production"]
-         interval: 10s
-         retries: 5
-         start_period: 30s
-         timeout: 10s
-       security_opt: ["no-new-privileges:true"]
-       mem_limit: 1g
-       pids_limit: 100
-
-     dawarich_redis:
-       image: redis:7.4-alpine
-       container_name: custom-app-dawarich-redis-1
-       restart: always
-       # NB: comments MUST stay above `command:`. A `#` inside the folded `>`
-       # scalar is NOT a comment, it is passed to redis-server as a literal arg.
-       command: >
-         redis-server
-         --save 900 1
-         --save 300 10
-         --appendonly no
-         --maxmemory 64mb
-         --maxmemory-policy allkeys-lru
-       volumes:
-         - /mnt/ssd-storage/apps-data/dawarich/redis:/data
-       healthcheck:
-         test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
-         interval: 10s
-         retries: 5
-         start_period: 30s
-         timeout: 10s
-       security_opt: ["no-new-privileges:true"]
-       mem_limit: 128m
-       pids_limit: 100
-
-     dawarich_app:
-       image: freikin/dawarich:1.11.0 # https://github.com/Freika/dawarich/releases
-       container_name: custom-app-dawarich-app-1
-       restart: unless-stopped
-       entrypoint: web-entrypoint.sh
-       command: ["bin/rails", "server", "-p", "3000", "-b", "::"]
-       environment:
-         RAILS_ENV: production
-         PUID: "568"
-         PGID: "568"
-         REDIS_URL: redis://dawarich_redis:6379
-         DATABASE_HOST: dawarich_db
-         DATABASE_PORT: "5432"
-         DATABASE_USERNAME: dawarich
-         DATABASE_PASSWORD: "<POSTGRES_PASSWORD>"
-         DATABASE_NAME: dawarich_production
-         APPLICATION_HOSTS: YOUR_DAWARICH_DOMAIN
-         # http (not https) behind Traefik: force_ssl would 301-redirect the
-         # healthcheck wget to https://127.0.0.1:3000 and break it.
-         APPLICATION_PROTOCOL: http
-         TIME_ZONE: Europe/Berlin
-         SECRET_KEY_BASE: "<SECRET_KEY_BASE>"
-         SELF_HOSTED: "true"
-         STORE_GEODATA: "true"
-         WEB_CONCURRENCY: "1"
-         RAILS_MAX_THREADS: "3"
-         RAILS_LOG_TO_STDOUT: "true"
-         DOMAIN: YOUR_DAWARICH_DOMAIN
-         SMTP_SERVER: my-smtp-server
-         SMTP_PORT: "587"
-         SMTP_USERNAME: "<username-for-smtp>"
-         SMTP_PASSWORD: "<password-for-smtp>"
-         SMTP_FROM: "<dawarich@mydomain.com>"
-         SMTP_AUTHENTICATION: plain
-         SMTP_STARTTLS: "true"
-         # Reverse geocoding via chibigeo (Photon-compatible, hosted by the
-         # Dawarich team). Sign up at chibigeo.com. Remove to disable.
-         PHOTON_API_HOST: app.chibigeo.com/v1/photon
-         PHOTON_API_KEY: "<CHIBIGEO_API_KEY>"
-         PHOTON_API_USE_HTTPS: "true"
-       ports:
-         - "30081:3000"
-       volumes:
-         - /mnt/ssd-storage/apps-data/dawarich/public:/var/app/public
-         - /mnt/ssd-storage/apps-data/dawarich/watched:/var/app/tmp/imports/watched
-         - /mnt/ssd-storage/apps-data/dawarich/storage:/var/app/storage
-       depends_on:
-         dawarich_db:
-           condition: service_healthy
-           restart: true
-         dawarich_redis:
-           condition: service_healthy
-           restart: true
-       security_opt: ["no-new-privileges:true"]
-       mem_limit: 2g
-       pids_limit: 200
-       healthcheck:
-         test: ["CMD-SHELL", "wget -qO - http://127.0.0.1:3000/api/v1/health | grep -q '"status"\\s*:\\s*"ok"'"]
-         interval: 10s
-         retries: 30
-         start_period: 30s
-         timeout: 10s
-
-     dawarich_sidekiq:
-       image: freikin/dawarich:1.11.0
-       container_name: custom-app-dawarich-sidekiq-1
-       restart: unless-stopped
-       entrypoint: sidekiq-entrypoint.sh
-       command: ["sidekiq"]
-       environment:
-         RAILS_ENV: production
-         PUID: "568"
-         PGID: "568"
-         REDIS_URL: redis://dawarich_redis:6379
-         DATABASE_HOST: dawarich_db
-         DATABASE_PORT: "5432"
-         DATABASE_USERNAME: dawarich
-         DATABASE_PASSWORD: "<POSTGRES_PASSWORD>"
-         DATABASE_NAME: dawarich_production
-         APPLICATION_HOSTS: YOUR_DAWARICH_DOMAIN
-         BACKGROUND_PROCESSING_CONCURRENCY: "2"
-         RAILS_MAX_THREADS: "3"
-         APPLICATION_PROTOCOL: http
-         SECRET_KEY_BASE: "<SECRET_KEY_BASE>"
-         SELF_HOSTED: "true"
-         STORE_GEODATA: "true"
-         RAILS_LOG_TO_STDOUT: "true"
-         # SMTP and reverse-geocoding env must match dawarich_app (Sidekiq
-         # delivers mail and runs geocoding jobs).
-         DOMAIN: YOUR_DAWARICH_DOMAIN
-         SMTP_SERVER: my-smtp-server
-         SMTP_PORT: "587"
-         SMTP_USERNAME: "<username-for-smtp>"
-         SMTP_PASSWORD: "<password-for-smtp>"
-         SMTP_FROM: "<dawarich@mydomain.com>"
-         SMTP_AUTHENTICATION: plain
-         SMTP_STARTTLS: "true"
-         PHOTON_API_HOST: app.chibigeo.com/v1/photon
-         PHOTON_API_KEY: "<CHIBIGEO_API_KEY>"
-         PHOTON_API_USE_HTTPS: "true"
-       volumes:
-         - /mnt/ssd-storage/apps-data/dawarich/public:/var/app/public
-         - /mnt/ssd-storage/apps-data/dawarich/watched:/var/app/tmp/imports/watched
-         - /mnt/ssd-storage/apps-data/dawarich/storage:/var/app/storage
-       depends_on:
-         dawarich_db:
-           condition: service_healthy
-           restart: true
-         dawarich_redis:
-           condition: service_healthy
-           restart: true
-         dawarich_app:
-           condition: service_healthy
-           restart: true
-       security_opt: ["no-new-privileges:true"]
-       mem_limit: 1g
-       pids_limit: 200
-       healthcheck:
-         test: ["CMD-SHELL", "pgrep -f sidekiq"]
-         interval: 10s
-         retries: 30
-         start_period: 30s
-         timeout: 10s
-   ```
+   Four containers: `dawarich_db` (PostgreSQL/PostGIS), `dawarich_redis`,
+   `dawarich_app` (Rails/Puma), `dawarich_sidekiq` (background jobs). All
+   env/placeholders live in the file above.
 
 4. **Fill in the placeholders.** The YAML editor takes no `.env`, so replace
    all `"<POSTGRES_PASSWORD>"` (3x), `"<SECRET_KEY_BASE>"` (2x), SMTP
-   placeholders (2x each), and `"<CHIBIGEO_API_KEY>"` (2x) with real values
-   before pasting. Keep the double quotes.
+   placeholders (2x each), and `"<CHIBIGEO_API_KEY>"` (2x) with real values in
+   the file before installing. Keep the double quotes.
 
 5. Click **Install** and watch the **Containers** tab until all four services
    are healthy. First-boot Rails migrations can take a few minutes.

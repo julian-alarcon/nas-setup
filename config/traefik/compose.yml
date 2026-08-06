@@ -1,0 +1,35 @@
+name: traefik
+services:
+  reverse-proxy:
+    image: traefik:v3 # https://github.com/traefik/traefik/releases
+    restart: always
+    container_name: custom-app-traefik-1
+    command:
+      - "--log.level=INFO"
+      - "--accesslog=true"
+      # Dashboard served via api@internal on its own `dashboard` entrypoint
+      # (port 35001), bound to the `dashboard` router in the dynamic config.
+      - "--api.dashboard=true"
+      - "--providers.file.filename=/etc/traefik/traefik_dynamic.yml"
+      - "--entrypoints.websecure.address=:35000"
+      # Dashboard entrypoint: LAN-only. Do NOT port-forward 35001 on the router.
+      - "--entrypoints.dashboard.address=:35001"
+      - "--certificatesresolvers.myresolver.acme.email=letsencrypt@mail.desentropia.com" # Your email for Let's Encrypt notifications
+      - "--certificatesresolvers.myresolver.acme.storage=/etc/traefik/letsencrypt/acme.json" # Storage for certificates
+      - "--certificatesresolvers.myresolver.acme.dnschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.dnschallenge.provider=YOUR_DNS_PROVIDER"
+      - "--certificatesresolvers.myresolver.acme.dnschallenge.resolvers=1.1.1.1:53,8.8.8.8:53"
+      # - "--certificatesresolvers.myresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory" # Use Let's Encrypt staging server
+      - "--certificatesresolvers.myresolver.acme.caserver=https://acme-v02.api.letsencrypt.org/directory" # Use Let's Encrypt production
+    environment:
+      - DNS_API_TOKEN=YOUR_DNS_API_TOKEN # Use the env vars your DNS provider expects
+    ports:
+      - "35000:35000" # Public entrypoint (port-forward this one)
+      - "35001:35001" # Dashboard entrypoint, LAN-only (do NOT port-forward)
+    volumes:
+      - /mnt/ssd-storage/apps-data/traefik:/etc/traefik/
+    read_only: true # acme.json is on the mounted volume, so the cert store stays writable
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m

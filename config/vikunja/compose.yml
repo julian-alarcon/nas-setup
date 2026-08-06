@@ -1,0 +1,31 @@
+services:
+  vikunja:
+    image: vikunja/vikunja:2 # https://github.com/go-vikunja/vikunja/releases
+    restart: unless-stopped
+    container_name: custom-app-vikunja-1
+    user: "568:568"
+    environment:
+      # Public URL, trailing slash required (api<->frontend communication).
+      - VIKUNJA_SERVICE_PUBLICURL=https://YOUR_VIKUNJA_DOMAIN:35000/
+      - VIKUNJA_SERVICE_SECRET=<VIKUNJA_SERVICE_SECRET>
+      - VIKUNJA_DATABASE_TYPE=sqlite
+      - VIKUNJA_DATABASE_PATH=/db/vikunja.db
+      # Lock the instance down: no self-registration (create users via admin).
+      - VIKUNJA_SERVICE_ENABLEREGISTRATION=false
+      - VIKUNJA_SERVICE_TIMEZONE=Europe/Berlin
+      # SMTP for notifications/password-reset. STARTTLS on 587 by default;
+      # set VIKUNJA_MAILER_FORCESSL=true only for implicit TLS on 465.
+      - VIKUNJA_MAILER_ENABLED=true
+      - VIKUNJA_MAILER_HOST=my-smtp-server
+      - VIKUNJA_MAILER_PORT=587
+      - VIKUNJA_MAILER_USERNAME=<username-for-smtp>
+      - VIKUNJA_MAILER_PASSWORD=<password-for-smtp>
+      - VIKUNJA_MAILER_FROMEMAIL=<vikunja@mydomain.com>
+    ports:
+      - "30071:3456"
+    volumes:
+      - /mnt/ssd-storage/apps-data/vikunja/db:/db
+      - /mnt/ssd-storage/apps-data/vikunja/files:/app/vikunja/files
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    pids_limit: 200

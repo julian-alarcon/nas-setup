@@ -1,0 +1,29 @@
+# Source: https://forums.truenas.com/t/guide-how-to-install-qbittorrent-or-any-app-with-vpn-on-truenas-electric-eel/12677
+# Configuration https://github.com/qdm12/gluetun-wiki
+name: gluetun
+services:
+  gluetun:
+    image: qmcgaw/gluetun:v3 # https://hub.docker.com/r/qmcgaw/gluetun/tags
+    restart: always
+    container_name: custom-app-gluetun-1
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - 8888:8888/tcp # HTTP proxy
+      - 8388:8388/tcp # Shadowsocks
+      - 8388:8388/udp # Shadowsocks
+      - 8080:8080 # qbittorrent webui
+      - 6881:6881 # qbittorrent
+      - 6881:6881/udp # qbittorrent
+    volumes:
+      - /mnt/ssd-storage/apps-data/gluetun:/gluetun
+    environment:
+      - VPN_TYPE=wireguard
+      - VPN_SERVICE_PROVIDER=protonvpn
+      - WIREGUARD_PRIVATE_KEY=WIRGUARD_PRIVATE_KEY
+      - SERVER_COUNTRIES=Switzerland
+      - PORT_FORWARD_ONLY
+      - UPDATER_PERIOD=24h
+      - VPN_PORT_FORWARDING=on
+      - VPN_PORT_FORWARDING_PROVIDER=protonvpn
+      - FIREWALL_VPN_INPUT_PORTS=6881

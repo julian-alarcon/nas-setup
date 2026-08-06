@@ -1,0 +1,171 @@
+services:
+  dawarich_db:
+    image: postgis/postgis:17-3.5-alpine # https://github.com/postgis/docker-postgis/releases
+    container_name: custom-app-dawarich-db-1
+    restart: always
+    shm_size: 256M
+    environment:
+      POSTGRES_USER: dawarich
+      POSTGRES_PASSWORD: "<POSTGRES_PASSWORD>"
+      POSTGRES_DB: dawarich_production
+    volumes:
+      - /mnt/ssd-storage/apps-data/dawarich/db:/var/lib/postgresql/data
+      - /mnt/ssd-storage/apps-data/dawarich/shared:/var/shared
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dawarich -d dawarich_production"]
+      interval: 10s
+      retries: 5
+      start_period: 30s
+      timeout: 10s
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1g
+    pids_limit: 100
+
+  dawarich_redis:
+    image: redis:7.4-alpine
+    container_name: custom-app-dawarich-redis-1
+    restart: always
+    # NB: comments MUST stay above `command:`. A `#` inside the folded `>`
+    # scalar is NOT a comment, it is passed to redis-server as a literal arg.
+    command: >
+      redis-server
+      --save 900 1
+      --save 300 10
+      --appendonly no
+      --maxmemory 64mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - /mnt/ssd-storage/apps-data/dawarich/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      retries: 5
+      start_period: 30s
+      timeout: 10s
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    pids_limit: 100
+
+  dawarich_app:
+    image: freikin/dawarich:1.11.0 # https://github.com/Freika/dawarich/releases
+    container_name: custom-app-dawarich-app-1
+    restart: unless-stopped
+    entrypoint: web-entrypoint.sh
+    command: ["bin/rails", "server", "-p", "3000", "-b", "::"]
+    environment:
+      RAILS_ENV: production
+      PUID: "568"
+      PGID: "568"
+      REDIS_URL: redis://dawarich_redis:6379
+      DATABASE_HOST: dawarich_db
+      DATABASE_PORT: "5432"
+      DATABASE_USERNAME: dawarich
+      DATABASE_PASSWORD: "<POSTGRES_PASSWORD>"
+      DATABASE_NAME: dawarich_production
+      APPLICATION_HOSTS: YOUR_DAWARICH_DOMAIN
+      # http (not https) behind Traefik: force_ssl would 301-redirect the
+      # healthcheck wget to https://127.0.0.1:3000 and break it.
+      APPLICATION_PROTOCOL: http
+      TIME_ZONE: Europe/Berlin
+      SECRET_KEY_BASE: "<SECRET_KEY_BASE>"
+      SELF_HOSTED: "true"
+      STORE_GEODATA: "true"
+      WEB_CONCURRENCY: "1"
+      RAILS_MAX_THREADS: "3"
+      RAILS_LOG_TO_STDOUT: "true"
+      DOMAIN: YOUR_DAWARICH_DOMAIN
+      SMTP_SERVER: my-smtp-server
+      SMTP_PORT: "587"
+      SMTP_USERNAME: "<username-for-smtp>"
+      SMTP_PASSWORD: "<password-for-smtp>"
+      SMTP_FROM: "<dawarich@mydomain.com>"
+      SMTP_AUTHENTICATION: plain
+      SMTP_STARTTLS: "true"
+      # Reverse geocoding via chibigeo (Photon-compatible, hosted by the
+      # Dawarich team). Sign up at chibigeo.com. Remove to disable.
+      PHOTON_API_HOST: app.chibigeo.com/v1/photon
+      PHOTON_API_KEY: "<CHIBIGEO_API_KEY>"
+      PHOTON_API_USE_HTTPS: "true"
+    ports:
+      - "30081:3000"
+    volumes:
+      - /mnt/ssd-storage/apps-data/dawarich/public:/var/app/public
+      - /mnt/ssd-storage/apps-data/dawarich/watched:/var/app/tmp/imports/watched
+      - /mnt/ssd-storage/apps-data/dawarich/storage:/var/app/storage
+    depends_on:
+      dawarich_db:
+        condition: service_healthy
+        restart: true
+      dawarich_redis:
+        condition: service_healthy
+        restart: true
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 2g
+    pids_limit: 200
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO - http://127.0.0.1:3000/api/v1/health | grep -q '\"status\"\\s*:\\s*\"ok\"'"]
+      interval: 10s
+      retries: 30
+      start_period: 30s
+      timeout: 10s
+
+  dawarich_sidekiq:
+    image: freikin/dawarich:1.11.0
+    container_name: custom-app-dawarich-sidekiq-1
+    restart: unless-stopped
+    entrypoint: sidekiq-entrypoint.sh
+    command: ["sidekiq"]
+    environment:
+      RAILS_ENV: production
+      PUID: "568"
+      PGID: "568"
+      REDIS_URL: redis://dawarich_redis:6379
+      DATABASE_HOST: dawarich_db
+      DATABASE_PORT: "5432"
+      DATABASE_USERNAME: dawarich
+      DATABASE_PASSWORD: "<POSTGRES_PASSWORD>"
+      DATABASE_NAME: dawarich_production
+      APPLICATION_HOSTS: YOUR_DAWARICH_DOMAIN
+      BACKGROUND_PROCESSING_CONCURRENCY: "2"
+      RAILS_MAX_THREADS: "3"
+      APPLICATION_PROTOCOL: http
+      SECRET_KEY_BASE: "<SECRET_KEY_BASE>"
+      SELF_HOSTED: "true"
+      STORE_GEODATA: "true"
+      RAILS_LOG_TO_STDOUT: "true"
+      # SMTP and reverse-geocoding env must match dawarich_app (Sidekiq
+      # delivers mail and runs geocoding jobs).
+      DOMAIN: YOUR_DAWARICH_DOMAIN
+      SMTP_SERVER: my-smtp-server
+      SMTP_PORT: "587"
+      SMTP_USERNAME: "<username-for-smtp>"
+      SMTP_PASSWORD: "<password-for-smtp>"
+      SMTP_FROM: "<dawarich@mydomain.com>"
+      SMTP_AUTHENTICATION: plain
+      SMTP_STARTTLS: "true"
+      PHOTON_API_HOST: app.chibigeo.com/v1/photon
+      PHOTON_API_KEY: "<CHIBIGEO_API_KEY>"
+      PHOTON_API_USE_HTTPS: "true"
+    volumes:
+      - /mnt/ssd-storage/apps-data/dawarich/public:/var/app/public
+      - /mnt/ssd-storage/apps-data/dawarich/watched:/var/app/tmp/imports/watched
+      - /mnt/ssd-storage/apps-data/dawarich/storage:/var/app/storage
+    depends_on:
+      dawarich_db:
+        condition: service_healthy
+        restart: true
+      dawarich_redis:
+        condition: service_healthy
+        restart: true
+      dawarich_app:
+        condition: service_healthy
+        restart: true
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1g
+    pids_limit: 200
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f sidekiq"]
+      interval: 10s
+      retries: 30
+      start_period: 30s
+      timeout: 10s

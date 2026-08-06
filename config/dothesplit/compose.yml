@@ -1,0 +1,33 @@
+services:
+  dothesplit:
+    image: ghcr.io/julian-alarcon/dothesplit:1
+    restart: unless-stopped
+    container_name: custom-app-dothesplit-1
+    environment:
+      API_HTTP_ADDR: ":8080"
+      WEB_ORIGIN: "https://YOUR_DOTHESPLIT_DOMAIN:35000"
+      COOKIE_SECURE: "true"
+      DATABASE_DRIVER: sqlite
+      DATABASE_URL: "file:/data/dts.db"
+      EMAIL_ENC_KEY: "<EMAIL_ENC_KEY>"
+      EMAIL_HMAC_KEY: "<EMAIL_HMAC_KEY>"
+      PASSWORD_PEPPER: "<PASSWORD_PEPPER>"
+      JWT_SIGNING_KEY: "<JWT_SIGNING_KEY>"
+      TRUSTED_PROXIES: "192.168.1.200/32"
+      LOG_LEVEL: info
+    ports:
+      # The binary serves both /v1 and the embedded SPA.
+      - "30051:8080"
+    volumes:
+      - /mnt/ssd-storage/apps-data/dothesplit/data:/data
+    healthcheck:
+      test: ["CMD", "/dothesplit", "--healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m

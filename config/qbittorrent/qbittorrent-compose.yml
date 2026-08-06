@@ -1,0 +1,19 @@
+# Source: https://forums.truenas.com/t/guide-how-to-install-qbittorrent-or-any-app-with-vpn-on-truenas-electric-eel/12677
+# Configuration https://docs.linuxserver.io/images/docker-qbittorrent
+name: qbittorrent
+services:
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:5.2.1 # https://gitlab.com/Linuxserver.io/docker-qbittorrent/container_registry/774438
+    restart: always
+    container_name: custom-app-qbittorrent-1
+    environment:
+      - PUID=568 # Linux User ID for user: apps
+      - PGID=568 # Linux User ID for group: apps
+      - TZ=Europe/Berlin
+      - WEBUI_PORT=8080
+      - TORRENTING_PORT=6881
+    volumes:
+      - /mnt/ssd-storage/apps-data/qbittorrent/config:/config #Directory you want to save your qbit config files
+      - /mnt/backup-and-downloads/movies-series:/media #movies/series/music directory
+    network_mode: container:custom-app-gluetun-1 #this is what makes the app to connect to the VPN.
+    # Note that all ports were moved to the gluetun app.

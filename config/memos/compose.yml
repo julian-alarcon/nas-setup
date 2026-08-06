@@ -1,0 +1,19 @@
+services:
+  memos:
+    image: neosmemo/memos:stable # https://github.com/usememos/memos/releases
+    restart: unless-stopped
+    container_name: custom-app-memos-1
+    environment:
+      - MEMOS_MODE=prod
+      - MEMOS_DRIVER=sqlite
+      - MEMOS_PORT=5230
+      # Public URL, required behind a reverse proxy.
+      - MEMOS_INSTANCE_URL=https://YOUR_MEMOS_DOMAIN:35000
+      - TZ=Europe/Berlin
+    ports:
+      - "30061:5230"
+    volumes:
+      - /mnt/ssd-storage/apps-data/memos:/var/opt/memos
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    pids_limit: 100
