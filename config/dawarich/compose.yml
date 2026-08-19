@@ -63,7 +63,7 @@ services:
       DATABASE_PASSWORD: "<POSTGRES_PASSWORD>"
       DATABASE_NAME: dawarich_production
       APPLICATION_HOSTS: YOUR_DAWARICH_DOMAIN
-      # http (not https) behind Traefik: force_ssl would 301-redirect the
+      # http (not https) behind Caddy: force_ssl would 301-redirect the
       # healthcheck wget to https://127.0.0.1:3000 and break it.
       APPLICATION_PROTOCOL: http
       TIME_ZONE: Europe/Berlin

@@ -1,0 +1,32 @@
+name: caddy
+services:
+  caddy:
+    # Pre-built Caddy image with the Cloudflare DNS module included, so the
+    # ACME DNS-01 challenge works without a custom build.
+    # https://github.com/caddybuilds/caddy-cloudflare
+    # https://hub.docker.com/r/caddybuilds/caddy-cloudflare/tags
+    image: caddybuilds/caddy-cloudflare:2.11.4-alpine
+    restart: always
+    container_name: custom-app-caddy-1
+    ports:
+      - "35000:35000" # Public HTTPS entrypoint (port-forward this on the router)
+    volumes:
+      - /mnt/ssd-storage/apps-data/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /mnt/ssd-storage/apps-data/caddy/data:/data
+      - /mnt/ssd-storage/apps-data/caddy/config:/config
+    environment:
+      # Cloudflare API token with Zone:DNS:Edit permission.
+      # https://developers.cloudflare.com/api/tokens/create/
+      - CLOUDFLARE_API_TOKEN=YOUR_CLOUDFLARE_API_TOKEN
+    # NOTE: do NOT use cap_drop:[ALL] or no-new-privileges with this image.
+    # Caddy's alpine entrypoint needs capabilities (NET_BIND_SERVICE to bind
+    # privileged ports 80/443, and its admin/init setup) to start; stripping
+    # them causes `exec /usr/bin/caddy: operation not permitted`.
+    read_only: true
+    cap_add:
+      - NET_BIND_SERVICE
+      - NET_ADMIN
+    security_opt:
+      - "no-new-privileges:false"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m

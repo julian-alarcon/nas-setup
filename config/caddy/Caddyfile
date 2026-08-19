@@ -1,0 +1,118 @@
+{
+    # ── Global options ────────────────────────────────────────────────
+    email letsencrypt@mail.desentropia.com
+
+    # DNS-01 challenge via Cloudflare (the caddy-dns/cloudflare module is
+    # built into the caddybuilds/caddy-cloudflare image,  no custom build
+    # needed).  Create a Cloudflare API token with Zone:DNS:Edit permission
+    # and set it as CLOUDFLARE_API_TOKEN in compose.yml.
+    acme_dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+
+    # Only port 35000 is forwarded on the router, so disable the default
+    # HTTP→HTTPS redirect listener on port 80.
+    auto_https disable_redirects
+
+    # DNS resolvers for the ACME DNS-01 challenge (same as Traefik's
+    # dnschallenge.resolvers).  Using public resolvers avoids stale-cache
+    # issues with the ISP's DNS during certificate provisioning.
+    tls_resolvers 1.1.1.1 8.8.8.8
+
+    # Use Let's Encrypt production (the default).  For initial testing switch
+    # to the staging endpoint to avoid rate-limits while you iterate:
+    #   acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+# ── Reusable snippets ──────────────────────────────────────────────
+(security_headers) {
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Frame-Options "DENY"
+        X-Content-Type-Options "nosniff"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+}
+
+# Access logging to stdout (equivalent to Traefik's --accesslog=true).
+(access_log) {
+    log {
+        output stdout
+        format json
+    }
+}
+
+# TLS 1.3 only.
+(tls_13) {
+    tls {
+        protocols tls1.3 tls1.3
+    }
+}
+
+# ── App site blocks ────────────────────────────────────────────────
+# All sites share the single public entrypoint :35000 (the only port
+# forwarded on the router).  Caddy auto-provisions and renews the
+# certificate for each hostname via the Cloudflare DNS-01 challenge.
+
+# Immich
+YOUR_IMMICH_DOMAIN:35000 {
+    import tls_13
+    import security_headers
+    import access_log
+    encode zstd gzip
+
+    reverse_proxy 192.168.1.200:30041
+}
+
+# Jellyfin,  served at /jellyfin subpath (prefix stripped before proxying).
+YOUR_JELLYFIN_DOMAIN:35000 {
+    import tls_13
+    import security_headers
+    import access_log
+
+    handle /jellyfin {
+        redir /jellyfin/ permanent
+    }
+    handle_path /jellyfin/* {
+        reverse_proxy 192.168.1.200:30013
+    }
+}
+
+# DoTheSplit
+YOUR_DOTHESPLIT_DOMAIN:35000 {
+    import tls_13
+    import security_headers
+    import access_log
+    encode zstd gzip
+
+    reverse_proxy 192.168.1.200:30051
+}
+
+# Memos
+YOUR_MEMOS_DOMAIN:35000 {
+    import tls_13
+    import security_headers
+    import access_log
+    encode zstd gzip
+
+    reverse_proxy 192.168.1.200:30061
+}
+
+# Vikunja
+YOUR_VIKUNJA_DOMAIN:35000 {
+    import tls_13
+    import security_headers
+    import access_log
+    encode zstd gzip
+
+    reverse_proxy 192.168.1.200:30071
+}
+
+# Dawarich
+YOUR_DAWARICH_DOMAIN:35000 {
+    import tls_13
+    import security_headers
+    import access_log
+    encode zstd gzip
+
+    reverse_proxy 192.168.1.200:30081
+}

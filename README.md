@@ -312,12 +312,12 @@ Rules:
 
 - Keep every NAS record **unproxied** (DNS resolves straight to the home IP). A
   CDN/proxy in front would not pass the custom port `35000` and would break
-  Traefik's TLS.
+  Caddy's TLS.
 - Use **explicit CNAMEs per service**, not a `*` wildcard. A wildcard resolves
   every possible name to the home IP (wider attack surface); explicit records
   mean only intended hostnames resolve.
-- Adding a service = one CNAME + one Traefik router. No `ddns-updater` change, no
-  new port-forward.
+- Adding a service = one CNAME + one Caddy site block. No `ddns-updater`
+  change, no new port-forward.
 
 #### ddns-updater
 
@@ -334,7 +334,7 @@ Host path: /mnt/ssd-storage/apps-data/ddns-updater
 
 1. Create the anchor `YOUR_ANCHOR_DOMAIN` as `A` (+ `AAAA` for IPv6) pointing at
    any placeholder IP; the updater overwrites it on first run. Keep it unproxied
-   so Traefik can complete the Let's Encrypt challenge and reach the origin.
+   so Caddy can complete the Let's Encrypt challenge and reach the origin.
 2. Get the zone ID and create a DNS-edit API token scoped to that zone.
 
 ##### App config
@@ -343,61 +343,79 @@ Configure a **single** entry for the anchor `YOUR_ANCHOR_DOMAIN` (provider, IP
 version `ipv4` + `ipv6`, zone ID, API token). Every service hostname is a static
 CNAME to this anchor, so it needs no `ddns-updater` entry of its own.
 
-#### Traefik reverse proxy setup
+#### Caddy reverse proxy setup
+
+Caddy terminates TLS, auto-provisions Let's Encrypt certificates via the DNS-01
+challenge, and reverse-proxies each app by hostname. Unlike Traefik there is no
+separate dashboard or dashboard port, only the single public HTTPS listener on
+`35000`.
 
 Dataset:
 
-- `ssd-storage/apps-data/traefik`
+- `ssd-storage/apps-data/caddy`
 
-##### Set certificates and config
+##### Set up the config files
 
-Create the directory and `acme.json` file for certificates. The storage target
-is a **file**, not a directory. Traefik refuses to start if `acme.json` is more
-permissive than `600`.
+Copy the Caddyfile and compose file into the dataset:
 
 ```sh
-mkdir -p  /mnt/ssd-storage/apps-data/traefik/letsencrypt
-touch     /mnt/ssd-storage/apps-data/traefik/letsencrypt/acme.json
-chmod 600 /mnt/ssd-storage/apps-data/traefik/letsencrypt/acme.json
-chmod 700 /mnt/ssd-storage/apps-data/traefik/letsencrypt
+mkdir -p /mnt/ssd-storage/apps-data/caddy
+cp config/caddy/Caddyfile   /mnt/ssd-storage/apps-data/caddy/
+cp config/caddy/compose.yml /mnt/ssd-storage/apps-data/caddy/
 ```
 
-Add configuration to file `/mnt/ssd-storage/apps-data/traefik/traefik_dynamic.yml`
-(copy from [`config/traefik/traefik_dynamic.yml`](config/traefik/traefik_dynamic.yml) and fill in
-`YOUR_*` domains and the dashboard `basicAuth` hash):
+Edit `/mnt/ssd-storage/apps-data/caddy/Caddyfile` and replace every `YOUR_*`
+domain placeholder with the real subdomains.
 
-##### Traefik app
+Create a Cloudflare API token with **Zone › DNS › Edit** permission for your
+zone (https://developers.cloudflare.com/api/tokens/create/) and set it as
+`CLOUDFLARE_API_TOKEN` in the compose file.
 
-Set new custom app with name `custom-app-traefik`. Install via custom YAML
-using [`config/traefik/compose.yml`](config/traefik/compose.yml). Fill in the
-`YOUR_DNS_PROVIDER`, `DNS_API_TOKEN`, and your Let's Encrypt email.
+##### Caddy app
 
-Port forwarding: forward **only** port `35000` (the public entrypoint) on the
-router to the NAS IP.
+Set new custom app with name `custom-app-caddy`. Install via custom YAML using
+[`config/caddy/compose.yml`](config/caddy/compose.yml), which references the
+pre-built [`caddybuilds/caddy-cloudflare`](https://github.com/caddybuilds/caddy-cloudflare)
+image (Caddy v2.11.4 with the Cloudflare DNS module already compiled in, no
+custom build needed). Fill in `CLOUDFLARE_API_TOKEN` with your Cloudflare API
+token.
 
-> [!IMPORTANT]
-> Do **not** port-forward `35001`. That is the dashboard entrypoint and must
-> stay LAN-only. Forwarding it would expose the Traefik dashboard to the
-> internet (basicAuth would be the only thing protecting it).
+Port forwarding: forward **only** port `35000` (the public HTTPS entrypoint) on
+the router to the NAS IP.  No other port is needed.
 
-##### Dashboard access (LAN-only)
+##### Useful commands
 
-The dashboard is on the `dashboard` entrypoint (port `35001`), reached by the
-NAS LAN IP, so it is unreachable from the internet as long as `35001` is not
-port-forwarded. It is served over plain HTTP (the Let's Encrypt cert is for the
-public hostname, not the IP), with basicAuth gating access.
+Check that the container is running and healthy:
 
-1. Generate the basicAuth hash and replace `REPLACE_WITH_YOUR_BCRYPT_HASH` in
-   the `dashboard-auth` middleware:
+```sh
+docker ps --filter name=custom-app-caddy-1
+```
 
-   ```sh
-   htpasswd -nbB admin 'YOUR_STRONG_PASSWORD'
-   # no htpasswd available:
-   # openssl passwd -apr1 'YOUR_STRONG_PASSWORD'   # then prefix with "admin:"
-   ```
+Follow the Caddy logs (request log + certificate events):
 
-2. From a LAN host, open `http://192.168.1.200:35001/dashboard/` (trailing
-   slash required) and authenticate with the `admin` user.
+```sh
+docker logs -f --tail 50 custom-app-caddy-1
+```
+
+Reload the Caddyfile without restarting the container (picks up config edits
+immediately):
+
+```sh
+docker exec custom-app-caddy-1 caddy reload --config /etc/caddy/Caddyfile
+```
+
+Validate the Caddyfile syntax before reloading (prints errors, exits non-zero
+on failure):
+
+```sh
+docker exec custom-app-caddy-1 caddy validate --config /etc/caddy/Caddyfile
+```
+
+List all running custom apps (quick overview of the whole stack):
+
+```sh
+docker ps --filter name=custom-app- --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+```
 
 #### Immich
 
@@ -452,7 +470,7 @@ From address: `<immich@>`
 
 [https://github.com/julian-alarcon/DoTheSplit/](https://github.com/julian-alarcon/DoTheSplit/)
 
-Expense-sharing app. Custom App published through Traefik at
+Expense-sharing app. Custom App published through Caddy at
 `https://YOUR_DOTHESPLIT_DOMAIN:35000/`. Full walkthrough in the project's
 `INSTALL.md`; below is the NAS-specific summary.
 
@@ -492,13 +510,13 @@ echo "JWT_SIGNING_KEY=$(openssl rand -base64 32)"
 3. **Install via custom YAML**: use the full config at
    [`config/dothesplit/compose.yml`](config/dothesplit/compose.yml), filling in
    the four secrets. `COOKIE_SECURE` is `true` and `WEB_ORIGIN` points at the
-   public HTTPS URL because Traefik terminates TLS in front of the app.
+   public HTTPS URL because Caddy terminates TLS in front of the app.
 
    The single container publishes a host port (`30051` -> container `8080`); it
    serves both `/v1` and the embedded client-side Vue SPA from one origin, so the
-   browser calls `/v1` directly (same origin) once the SPA loads. Traefik routes
+   browser calls `/v1` directly (same origin) once the SPA loads. Caddy routes
    `YOUR_DOTHESPLIT_DOMAIN:35000` to `http://192.168.1.200:30051` (see the
-   `dothesplit` router/service in the Traefik dynamic config above).
+   `dothesplit` site block in the Caddyfile above).
 
 4. **Fill in the secrets directly in the YAML.** The "Install via YAML" editor
    takes only the compose file, no env-var table, no `.env`, so hardcode the
@@ -512,9 +530,9 @@ echo "JWT_SIGNING_KEY=$(openssl rand -base64 32)"
 
 - DNS: `YOUR_DOTHESPLIT_DOMAIN` is a static CNAME -> `YOUR_ANCHOR_DOMAIN` (see
   the DNS model section); `ddns-updater` keeps the anchor current.
-- Router: no new port to open. DoTheSplit reuses the existing `websecure`
+- Router: no new port to open. DoTheSplit reuses the existing public
   entrypoint (`35000`) that is already port-forwarded to `192.168.1.200`;
-  Traefik routes it by `Host` header and obtains the certificate over the DNS
+  Caddy routes it by `Host` header and obtains the certificate over the DNS
   challenge.
 
 ##### First-run setup token
@@ -540,8 +558,8 @@ DB on start.
 [https://github.com/usememos/memos](https://github.com/usememos/memos)
 
 Lightweight self-hosted note-taking app. Uses SQLite (no external database
-needed). Published through Traefik at `https://YOUR_MEMOS_DOMAIN:35000/`
-on the shared `websecure` entrypoint.
+needed). Published through Caddy at `https://YOUR_MEMOS_DOMAIN:35000/`
+on the shared public entrypoint.
 
 Datasets:
 
@@ -568,8 +586,8 @@ mounted directory's ownership itself. No manual `chown` is needed.
 
 - DNS: create a static `CNAME` `YOUR_MEMOS_DOMAIN` -> `YOUR_ANCHOR_DOMAIN`
   (unproxied), per the DNS model section. No `ddns-updater` entry needed.
-- Router: no new port to open. Memos reuses the existing `websecure` entrypoint
-  (`35000`); Traefik routes it by `Host` header and obtains the certificate over
+- Router: no new port to open. Memos reuses the existing public entrypoint
+  (`35000`); Caddy routes it by `Host` header and obtains the certificate over
   the DNS challenge.
 
 ##### First-run setup
@@ -596,8 +614,8 @@ Then apply the [Memos security recommendations](https://usememos.com/docs/config
 [https://vikunja.io](https://vikunja.io)
 
 Self-hosted to-do / project management app. Uses SQLite (no external database
-needed). One image serves both API and frontend. Published through Traefik at
-`https://YOUR_VIKUNJA_DOMAIN:35000/` on the shared `websecure` entrypoint.
+needed). One image serves both API and frontend. Published through Caddy at
+`https://YOUR_VIKUNJA_DOMAIN:35000/` on the shared public entrypoint.
 
 Datasets:
 
@@ -637,8 +655,8 @@ openssl rand -hex 32
 
 - DNS: create a static `CNAME` `YOUR_VIKUNJA_DOMAIN` -> `YOUR_ANCHOR_DOMAIN`
   (unproxied), per the DNS model section. No `ddns-updater` entry needed.
-- Router: no new port to open. Vikunja reuses the existing `websecure`
-  entrypoint (`35000`); Traefik routes it by `Host` header and obtains the
+- Router: no new port to open. Vikunja reuses the existing public
+  entrypoint (`35000`); Caddy routes it by `Host` header and obtains the
   certificate over the DNS challenge.
 
 ##### First-run setup
@@ -656,7 +674,7 @@ Security notes:
 - Keep `VIKUNJA_SERVICE_SECRET` fixed and backed up; rotating it logs everyone
   out.
 - Registration stays disabled; add users with `vikunja user create`.
-- TLS is terminated by Traefik; `VIKUNJA_SERVICE_PUBLICURL` uses `https` so
+- TLS is terminated by Caddy; `VIKUNJA_SERVICE_PUBLICURL` uses `https` so
   generated links and api/frontend calls use the correct origin.
 - Back up `db/vikunja.db` and `files/` (covered by the snapshot/replication
   tasks below).
@@ -666,7 +684,7 @@ Security notes:
 [https://dawarich.app](https://dawarich.app)
 
 Self-hosted location-history / GPS-tracking app (Google Timeline alternative).
-Uses PostgreSQL/PostGIS plus Redis (four containers). Published through Traefik
+Uses PostgreSQL/PostGIS plus Redis (four containers). Published through Caddy
 at `https://YOUR_DAWARICH_DOMAIN:35000/`.
 
 Datasets:
@@ -703,7 +721,7 @@ rotating it invalidates all sessions.
    named volumes replaced by bind mounts; image pinned to `1.11.0` (not
    `:latest`); `PUID`/`PGID` set to `568`; resource limits sized for a 2-user
    household. Only `dawarich_app` publishes a host port (`30081` -> container
-   `3000`), matching the `dawarich-service` in the Traefik dynamic config.
+   `3000`), matching the `dawarich` site block in the Caddyfile.
 
    Four containers: `dawarich_db` (PostgreSQL/PostGIS), `dawarich_redis`,
    `dawarich_app` (Rails/Puma), `dawarich_sidekiq` (background jobs). All
@@ -720,8 +738,8 @@ rotating it invalidates all sessions.
 ##### DNS and port forwarding
 
 - DNS: `YOUR_DAWARICH_DOMAIN` is a static CNAME -> `YOUR_ANCHOR_DOMAIN`.
-- Router: no new port. Dawarich reuses `websecure` (`35000`); Traefik routes by
-  `Host` header and obtains the certificate over the DNS challenge.
+- Router: no new port. Dawarich reuses the public entrypoint (`35000`); Caddy
+  routes by `Host` header and obtains the certificate over the DNS challenge.
 
 ##### First-run setup
 
