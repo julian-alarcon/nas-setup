@@ -2,6 +2,8 @@
 
 NAS Setup with TrueNAS
 
+[TOC]
+
 ## Installation
 
 [TruenNAS SCALE 25.10](https://www.truenas.com/download/) iso image.
@@ -31,7 +33,7 @@ to
 ```
 
 Then execute `truenas-install`. Installation will perform with the desired size
-instead of using the full partition
+instead of using the full partition.
 
 If you need SWAP you can select to set it, it will not mess with the size previously
 selected (but, of course will create a new partition of E.g. 16 GB).
@@ -58,13 +60,62 @@ systemctl start fancontrol
 
 ### Network setup
 
+Run the initial TrueNAS webUI setup:
+
 1. Login to HTTPS address: [https://192.168.0.99](https://192.168.0.99)
 2. Setup password
 3. Select name: `nas-hostname`
-4. Setup IP
+4. Setup IP (temporary on the physical NIC, moved to the bridge below)
    - IP: `192.168.1.200/24`
-   - Gateway: `192.168/0/1`
-   - Nameservers: `194.242.2.2, 9.9.9.9, 192.168.0.1`
+   - Gateway: `192.168.1.1`
+   - Nameservers: `9.9.9.9, 149.112.112.112, 192.168.1.1`
+
+Network Configuration:
+Edit Global Configuration:
+  Hostname: `nas-hostname`
+  Service Announcement:
+    NetBIOS-NS: `Unchecked`
+    mDNS: `Checked`
+    WS-Discovery: `Checked`
+
+#### Linux Bridge (`br0`)
+
+Services (SMB, NFS, Apps, SSH) and VMs must **not** bind directly to the
+physical interface (`enp4s0`). Create a Linux Bridge (`br0`), strip the static
+IP/DHCP from `enp4s0`, make it a bridge member, and move the host static IP and
+default gateway onto `br0`.
+
+> [!IMPORTANT] Do this before VMs/Apps/sharing exist
+> **Stop everything that depends on the network first**: running VMs, TrueNAS
+> Apps, and file-sharing services (SMB/NFS).
+> Re-start them after the bridge is up.
+
+Built-in webUI **Network -> Interfaces -> Add**:
+
+Set DHCP to  Define Static IP Addresses for network device, and remove any
+Static IP Addresses from enp4s0.
+
+Then add a new bridge interface:
+
+- Type: `Bridge`
+- Name: `br0`
+- Bridge Members: `enp4s0` (the physical NIC; its IPv4/DHCP and IPv6 are
+  stripped, it becomes a plain bridge member)
+Static IP Addresses:
+
+  IP Address: `192.168.1.200/24`
+- DNS Nameservers: `194.242.2.2, 9.9.9.9, 192.168.1.1`
+
+If after saving/testing the configuration everything works, restart your system
+is recommended as just restarting the Apps may still bind to old network setup.
+
+> [!IMPORTANT] Why VMs must use the bridge
+> A VM NIC must attach to the **bridge** (`br0`/`br1`), **NOT** directly to the
+> physical NIC (`enp4s0`). Attaching to `enp4s0` creates a Linux `macvtap`,
+> which isolates host-to-guest and guest-to-host traffic. That causes internal
+> WebSocket loops, broken multicast discovery, and external routing
+> blackholes. E.g. the `Failed to save: Timeout` error during Home Assistant
+> onboarding. Attaching to `br0` avoids macvtap entirely.
 
 ### User setup
 
@@ -178,7 +229,7 @@ Dataset:
 
 - `ssd-storage/apps-data/jellyfin`
 
-##### Installation setup
+##### Installation setup for Jellyfin
 
 WebUI Port: `30013`
 Jellyfin Config Storage:
@@ -194,7 +245,7 @@ Mount path: `/media/movies-series`
 Host path: `/mnt/backup-and-downloads/movies-series`
 Passthrough available (non-NVIDIA) GPUs: `Checked`
 
-##### Web setup
+##### Web setup for Jellyfin
 
 Username: admin-jellyfin
 
@@ -268,14 +319,16 @@ Options:
 
 - Web UI -> Authentication -> Password: New Password
 - Web UI -> Authentication -> By pass authentication for clients on localhost
-- Web UI -> Authentication -> By pass authentication for clients in whitelisted IP subnets: 192.168.0.0/24
+- Web UI -> Authentication -> By pass authentication for clients in whitelisted
+  IP subnets: 192.168.0.0/24
 - Advanced -> Network interface: tun0
 - Optional IP address to bind to: All IPv4 address
 - Downloads -> Default Save Path: `/media`
 - Downloads -> Keep incomplete torrents in: `/media/downloads/torrents/incomplete`
 - Downloads -> Copy .torrent files to: `/media/downloads/torrents`
 - Downloads -> Copy .torrent files for finished downloads to: `/media/downloads/torrents`
-- Connection -> Port used for incoming connections: 6881 (Not needed to modify as network is using glutun)
+- Connection -> Port used for incoming connections: 6881 (Not needed to modify
+  as network is using glutun)
 - Connection -> Global maximum number of connections: unchecked
 - Connection -> Maximum number of connections per torrent: unchecked
 - Connection -> Global maximum number of upload slots: unchecked
@@ -361,14 +414,13 @@ Copy the Caddyfile and compose file into the dataset:
 ```sh
 mkdir -p /mnt/ssd-storage/apps-data/caddy
 cp config/caddy/Caddyfile   /mnt/ssd-storage/apps-data/caddy/
-cp config/caddy/compose.yml /mnt/ssd-storage/apps-data/caddy/
 ```
 
 Edit `/mnt/ssd-storage/apps-data/caddy/Caddyfile` and replace every `YOUR_*`
 domain placeholder with the real subdomains.
 
-Create a Cloudflare API token with **Zone › DNS › Edit** permission for your
-zone (https://developers.cloudflare.com/api/tokens/create/) and set it as
+[Create a Cloudflare API token](https://developers.cloudflare.com/api/tokens/create/)
+with **Zone › DNS › Edit** permission for your zone and set it as
 `CLOUDFLARE_API_TOKEN` in the compose file.
 
 ##### Caddy app
@@ -433,7 +485,7 @@ mkdir -p /mnt/personal-media/immich/data/{upload,thumbs,library,profile,backups,
 mkdir -p /mnt/ssd-storage/apps-data/immich/pgData
 ```
 
-##### Installation setup
+##### Installation setup for Immich
 
 Timezone: `'Europe/Berlin' timezone`
 Enable Machine Learning: **Checked**
@@ -449,7 +501,7 @@ Postgres Data Storage:
 Type: `Host Path`
 Host Path: `/mnt/ssd-storage/apps-data/immich/pgData`
 
-##### Web setup
+##### Web setup for Immich
 
 Enter to the WebUI and set the default username (email) and password for
 `admin` user.
@@ -503,7 +555,7 @@ echo "PASSWORD_PEPPER=$(openssl rand -base64 32)"
 echo "JWT_SIGNING_KEY=$(openssl rand -base64 32)"
 ```
 
-##### Install the Custom App
+##### Install the Custom App for DoTheSplit
 
 1. **Apps -> Discover Apps -> Custom App**.
 2. **Application Name**: `custom-app-dothesplit`.
@@ -526,7 +578,7 @@ echo "JWT_SIGNING_KEY=$(openssl rand -base64 32)"
 5. Click **Install** and watch the **Containers** tab until the service is
    healthy.
 
-##### DNS and port forwarding
+##### DNS and port forwarding for DoTheSplit
 
 - DNS: `YOUR_DOTHESPLIT_DOMAIN` is a static CNAME -> `YOUR_ANCHOR_DOMAIN` (see
   the DNS model section); `ddns-updater` keeps the anchor current.
@@ -535,7 +587,7 @@ echo "JWT_SIGNING_KEY=$(openssl rand -base64 32)"
   Caddy routes it by `Host` header and obtains the certificate over the DNS
   challenge.
 
-##### First-run setup token
+##### First-run setup for DotheSplit
 
 The API prints a one-time setup token on first boot. From the TrueNAS shell:
 
@@ -570,7 +622,7 @@ pre-create. The Memos entrypoint starts as root, `chown`s `/var/opt/memos` to
 its non-root user **UID/GID 10001**, then drops privileges, so it fixes the
 mounted directory's ownership itself. No manual `chown` is needed.
 
-##### Install the Custom App
+##### Install the Custom App for Memos
 
 1. **Apps -> Discover Apps -> Custom App**.
 2. **Application Name**: `custom-app-memos`.
@@ -582,7 +634,7 @@ mounted directory's ownership itself. No manual `chown` is needed.
 4. Click **Install** and watch the **Containers** tab until the service is
    healthy.
 
-##### DNS and port forwarding
+##### DNS and port forwarding for Memos
 
 - DNS: create a static `CNAME` `YOUR_MEMOS_DOMAIN` -> `YOUR_ANCHOR_DOMAIN`
   (unproxied), per the DNS model section. No `ddns-updater` entry needed.
@@ -590,7 +642,7 @@ mounted directory's ownership itself. No manual `chown` is needed.
   (`35000`); Caddy routes it by `Host` header and obtains the certificate over
   the DNS challenge.
 
-##### First-run setup
+##### First-run setup for Memos
 
 Open `https://YOUR_MEMOS_DOMAIN:35000/` and create the admin account on
 the first visit (the first registered user becomes the host/admin). Protect this
@@ -639,7 +691,7 @@ value and store it in a password manager:
 openssl rand -hex 32
 ```
 
-##### Install the Custom App
+##### Install the Custom App for Vikunja
 
 1. **Apps -> Discover Apps -> Custom App**.
 2. **Application Name**: `custom-app-vikunja`.
@@ -651,7 +703,7 @@ openssl rand -hex 32
 4. Click **Install** and watch the **Containers** tab until the service is
    healthy.
 
-##### DNS and port forwarding
+##### DNS and port forwarding for Vikunja
 
 - DNS: create a static `CNAME` `YOUR_VIKUNJA_DOMAIN` -> `YOUR_ANCHOR_DOMAIN`
   (unproxied), per the DNS model section. No `ddns-updater` entry needed.
@@ -659,7 +711,7 @@ openssl rand -hex 32
   entrypoint (`35000`); Caddy routes it by `Host` header and obtains the
   certificate over the DNS challenge.
 
-##### First-run setup
+##### First-run setup for Vikunja
 
 With registration disabled, create the first user from the shell, then log in at
 `https://YOUR_VIKUNJA_DOMAIN:35000/`:
@@ -711,7 +763,7 @@ echo "SECRET_KEY_BASE=$(openssl rand -hex 64)"
 Store both in a password manager. `SECRET_KEY_BASE` signs Rails sessions;
 rotating it invalidates all sessions.
 
-##### Install the Custom App
+##### Install the Custom App for Dawarich
 
 1. **Apps -> Discover Apps -> Custom App**.
 2. **Application Name**: `custom-app-dawarich`.
@@ -735,13 +787,13 @@ rotating it invalidates all sessions.
 5. Click **Install** and watch the **Containers** tab until all four services
    are healthy. First-boot Rails migrations can take a few minutes.
 
-##### DNS and port forwarding
+##### DNS and port forwarding Dawarich
 
 - DNS: `YOUR_DAWARICH_DOMAIN` is a static CNAME -> `YOUR_ANCHOR_DOMAIN`.
 - Router: no new port. Dawarich reuses the public entrypoint (`35000`); Caddy
   routes by `Host` header and obtains the certificate over the DNS challenge.
 
-##### First-run setup
+##### First-run setup for Dawarich
 
 Log in at `https://YOUR_DAWARICH_DOMAIN:35000/` with the seeded admin
 (`demo@dawarich.app` / `safepassword`) and change it immediately. Then:
@@ -754,6 +806,91 @@ Log in at `https://YOUR_DAWARICH_DOMAIN:35000/` with the seeded admin
   hardcoded to `https://` since Dawarich 1.7.6.
 - Back up the PostgreSQL cluster with `pg_dumpall` (covered below); the
   `public/`, `watched/`, and `storage/` dirs are covered by dataset snapshots.
+
+#### Home Assistant
+
+Based on [Installing HAOS in a VM on TrueNAS CE](https://community.home-assistant.io/t/installing-haos-in-a-vm-on-truenas-ce/511393)
+
+Home Assistant runs on its own **VM** (e.g. 2 cores, 2 GB RAM) with its own IP
+on the same LAN as the TrueNAS host, *not* on the NAS machine itself. Its web
+UI listens on port `80` by default. It is published through Caddy at
+`https://YOUR_HA_DOMAIN:35000/` on the shared public entrypoint.
+
+Add Zvol:
+
+Location: `ssd-storage/apps-data/`
+Name: `homeassistant`
+Size: `32 GiB`
+
+Then download [Home Assistant Image KVM (.qcow2)](https://www.home-assistant.io/installation/linux)
+to a location in the NAS, **uncompress it** and then convert pointing to the
+created ZVol (add the prefix /dev/zvol/ ):
+
+```sh
+sudo -i
+cd /mnt/ssd-storage/apps-data
+wget https://github.com/home-assistant/operating-system/releases/download/18.2/haos_ova-18.2.qcow2.xz
+unxz -v haos_ova-18.2.qcow2.xz
+qemu-img convert -p -O raw haos_ova-18.2.qcow2 /dev/zvol/ssd-storage/apps-data/homeassistant
+```
+
+##### Installation setup for Home Assistant
+
+Add a new Virtual Machine.
+
+Operating System:
+  Guest Operating System: `Linux`
+  Name: `homeassistant`
+  Descriptin: `Home Assistant OS`
+  System Clock: `UTC`
+  Boot Method: `UEFI`
+  Start on Boot: `Checked`
+  Enable Display (VNC): `Checked`
+  Password: `SET_8_CHAR_VNC_PASSWORD`
+CPU And Memory:
+  Virtual CPU: `1`
+  Cores: `2`
+  Threads: `1`
+  CPU Mode: `Host Passtrought`
+  Memory Size: `2 GiB`
+  Minimum Memory Size: `512 MiB`
+Disks:
+  Use existing disk image
+  Select Disk Type: `VirtIO`
+  Select Existing Zvol: `ssd-storage/apps-data/homeassistant`
+Network Interface:
+  Adapter Type: `VirtIO`
+  Attach NIC: `br0`  # the Linux Bridge, NEVER enp4s0 (macvtap isolation)
+  Trust Guest Filters: `Unchecked`
+Installation Media: Nothing, click Next
+GPU: Nothing, click Next
+
+##### DNS and port forwarding for Home Assistant
+
+- DNS: `YOUR_HA_DOMAIN` is a static CNAME -> `YOUR_ANCHOR_DOMAIN` (see the DNS
+  model section).
+- Router: no new port. Home Assistant reuses the public entrypoint (`35000`);
+  Caddy routes it by `Host` header and obtains the certificate over the DNS
+  challenge.
+
+##### Web setup for Home Assistant
+
+Web UI:
+  Log in at `http://homeassistant.local/` and create the admin account.
+
+External URL:
+  Set to `https://YOUR_HA_DOMAIN:35000` (via **Settings -> System -> Network ->
+  External URL**) so HA-generated links and mobile-app connections use the
+  public address.
+
+Settings:
+  System:
+    Network:
+      Home Assistant URL: `https://YOUR_HA_DOMAIN:35000`
+      Http Server:
+        Reverse proxy:
+          Trust X-Forwarded-For: `Checked`
+          Trusted proxies: `192.168.1.200/32`
 
 ### Data Protection
 

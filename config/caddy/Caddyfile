@@ -116,3 +116,13 @@ YOUR_DAWARICH_DOMAIN:35000 {
 
     reverse_proxy 192.168.1.200:30081
 }
+
+# Home Assistant
+YOUR_HA_DOMAIN:35000 {
+    import tls_13
+    import security_headers
+    import access_log
+    encode zstd gzip
+
+    reverse_proxy YOUR_HA_VM_IP:80
+}
