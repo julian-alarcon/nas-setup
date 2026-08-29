@@ -256,32 +256,26 @@ Folders: `/media/movie-series`
 
 Libraries:
 Collection (Movies and TV Shows) -> Manage Library
-Subtitle Downloads, Download languages: Spanish; Latin, Spanish; Castilian, English
-Subtitle downloaders: Open Subtitles
+  Subtitle Downloads
+    Download languages: `Spanish; Latin`, `Spanish; Castilian`
+  Subtitle downloaders: `Open Subtitles`
 
 Playback:
-Transcoding:
-Hardware acceleration: Intel QuickSync (QSV) (This value depends on the GPU available)
-VA-API Device: /dev/dri/renderD128 (can be obtained from `ls -l /dev/dri`)
-Enable hardware decoding for: (Can be obtained from `/usr/lib/jellyfin-ffmpeg/vainfo --display drm --device /dev/dri/renderD128`)
-_ H264: checked
-_ HEVC: checked
-_ MPEG2: checked
-_ VC1: checked
-_ VP8: checked
-_ VP9: checked
-_ AV1: checked
-_ HEVC 10bit: checked
-_ VP9 10bit: checked
-_ HEVC RExt 8/10bit: checked
-_ HEVC RExt 12bit: checked
-_ Prefer OS native DXVA or VA-API hardware decoders: checked
-Hardware encoding options:
-_ Enable hardware encoding: checked
-_ Enable Intel Low-Power H.264 hardware encoder: checked
-_ Enable Intel Low-Power HEVC hardware encoder: checked
-Encoding format options:
-_ Allow encoding in HEVC format: checked \* Enable VPP Tone mapping: checked
+  Transcoding:
+    Hardware acceleration: `Intel QuickSync (QSV)` (This value depends on the GPU available)
+    QSV Device: `/dev/dri/renderD128` (can be obtained from `ls -l /dev/dri`)
+    Enable hardware decoding for: (Can be obtained from
+      `/usr/lib/jellyfin-ffmpeg/vainfo --display drm --device /dev/dri/renderD128`):
+      `H264`, `HEVC`, `MPEG2`, `VC1`, `VP8`, `VP9`, `AV1`, `HEVC 10bit`, `VP9 10bit`,
+      `HEVC RExt 8/10bit`, `HEVC RExt 12bit`,
+      `Prefer OS native DXVA or VA-API hardware decoders`
+    Hardware encoding options:
+      Enable hardware encoding: `Checked`
+      Enable Intel Low-Power H.264 hardware encoder: `Checked`
+      Enable Intel Low-Power HEVC hardware encoder: `Checked`
+    Encoding format options:
+      Allow encoding in HEVC format: `Checked`
+      Enable VPP Tone mapping: `Checked`
 
 > Review of GPU usage can be made in TrueNAS shell with the command `sudo intel_gpu_top`
 
@@ -968,6 +962,7 @@ openssl pkcs12 -export -out DEVICE_NAME.p12 -inkey DEVICE_NAME.key \
 
 > **Vault these now**, while they're in front of you (a laptop theft or disk
 > death later is exactly when you'll discover they were only on this machine):
+
 > - The **CA private key passphrase** (you just created it;
 >   losing it means you can no longer sign any new device cert)
 > - An **encrypted copy of `client-ca.key`** (without it you can't issue
@@ -1169,11 +1164,23 @@ Jobs**):
 - **Command:** `/root/app-backups.sh`
 - **Run As User:** `root`
 - **Schedule:** `30 0 * * *` (00:30 daily, ahead of the 01:00 restic run).
+- **Hide Standard Output:** unchecked. If left **checked**, TrueNAS does not
+  capture the script's stdout into the job log, so the run shows
+  "No logs are available" in the UI.
+- **Hide Standard Error:** unchecked. Same reason: keep it unchecked so errors
+  are captured into the job log too.
+- **Enabled:** checked. Without it the job is not scheduled.
+
+> In the API these map to `enabled: true`, `stdout: false` (Hide Standard
+> Output unchecked) and `stderr: false` (Hide Standard Error unchecked).
 
 On any failure the script emails a report via `midclt call mail.send` (to the
-TrueNAS local administrator address) and exits non-zero. Success is silent (no
-daily "OK" mail). Set `NOTIFY=0` to disable. TrueNAS Cron Jobs do not raise
-their own alert on a non-zero exit, so this email is the failure signal.
+TrueNAS local administrator address) and exits non-zero. On success it writes
+a per-step summary log to stdout (no daily "OK" mail). stdout is captured by
+TrueNAS into the Cron Job's `/var/log/jobs/<id>.log` and shown in the Job UI,
+so the run is visible there. Set `NOTIFY=0` to disable the failure email.
+TrueNAS Cron Jobs do not raise their own alert on a non-zero exit, so this
+email is the failure signal.
 
 The restic job backs up the whole `/mnt/backup-and-downloads/backups/` parent,
 so the dumps sync to S3 automatically, no separate source path needed. See
