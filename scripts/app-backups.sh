@@ -12,7 +12,9 @@
 #
 # On any failure it emails a report via `midclt call mail.send` (no recipient
 # set, so it goes to the TrueNAS local administrator address) and exits non-zero.
-# Success is silent (no daily "OK" noise). Set NOTIFY=0 to disable the email.
+# On success a per-step summary log is written to stdout so a TrueNAS Cron Job
+# can capture and display it (no daily "OK" mail). Set NOTIFY=0 to disable the
+# failure email.
 #
 set -euo pipefail
 
@@ -32,50 +34,58 @@ trap 'rm -f "$LOG"' EXIT
 
 fail() {
   local msg="$1"
-  echo "$msg" >>"$LOG"
+  echo "${msg}" >>"${LOG}"
   if [[ "${NOTIFY}" == "1" ]]; then
     payload="$(jq -n --arg s "app-backups FAILED on ${HOST}" \
-      --rawfile t "$LOG" '{subject: $s, text: $t}')"
-    midclt call mail.send "$payload" >/dev/null 2>&1 || true
+      --rawfile t "${LOG}" '{subject: $s, text: $t}')"
+    midclt call mail.send "${payload}" >/dev/null 2>&1 || true
   fi
-  cat "$LOG" >&2
+  cat "${LOG}" >&2
   exit 1
 }
 
 # Online .backup of a live SQLite DB via the pinned sqlite container.
 # The DB's directory is mounted read-write (the .backup API needs it for
 # WAL-mode databases; it reads pages under a shared lock and never mutates the
-# data). $DEST is mounted separately for the output.
-#   $1 = host path to the .db file   $2 = output filename in $DEST
+# data). ${DEST} is mounted separately for the output.
+#   $1 = host path to the .db file   $2 = output filename in ${DEST}
 sqlite_backup() {
   local db="$1" out="$2" dir base
-  dir="$(dirname "$db")"
-  base="$(basename "$db")"
+  dir="$(dirname "${db}")"
+  base="$(basename "${db}")"
   docker run --rm \
-    -v "$dir":/db \
-    -v "$DEST":/out \
-    "$SQLITE_IMG" \
-    "/db/$base" ".backup '/out/$out'" >>"$LOG" 2>&1
+    -v "${dir}":/db \
+    -v "${DEST}":/out \
+    "${SQLITE_IMG}" \
+    "/db/${base}" ".backup '/out/${out}'" >>"${LOG}" 2>&1
 }
 
-mkdir -p "$DEST" 2>>"$LOG" || fail "Could not create $DEST."
+mkdir -p "${DEST}" 2>>"${LOG}" || fail "Could not create ${DEST}."
+echo "$(date '+%F %T') app-backups started on ${HOST}" >>"${LOG}"
 
 # DoTheSplit (SQLite): online .backup while the app is running.
 sqlite_backup "/mnt/ssd-storage/apps-data/dothesplit/data/dts.db" "dothesplit.db" \
   || fail "DoTheSplit dump failed."
+echo "DoTheSplit dump OK -> ${DEST}/dothesplit.db" >>"${LOG}"
 
 # Vikunja: built-in consistent dump (database + files + config in one zip).
 # `-p` is the target DIRECTORY, `-f` the filename (overwritten each run).
 docker exec custom-app-vikunja-1 /app/vikunja/vikunja dump \
-  -p /app/vikunja/files -f vikunja.zip >>"$LOG" 2>&1 || fail "Vikunja dump failed."
-mv "/mnt/ssd-storage/apps-data/vikunja/files/vikunja.zip" "$DEST/vikunja.zip" \
-  >>"$LOG" 2>&1 || fail "Vikunja dump move failed."
+  -p /app/vikunja/files -f vikunja.zip >>"${LOG}" 2>&1 || fail "Vikunja dump failed."
+mv "/mnt/ssd-storage/apps-data/vikunja/files/vikunja.zip" "${DEST}/vikunja.zip" \
+  >>"${LOG}" 2>&1 || fail "Vikunja dump move failed."
+echo "Vikunja dump OK -> ${DEST}/vikunja.zip" >>"${LOG}"
 
 # Memos (SQLite): online .backup for a consistent copy while running.
 sqlite_backup "/mnt/ssd-storage/apps-data/memos/memos_prod.db" "memos.db" \
   || fail "Memos dump failed."
+echo "Memos dump OK -> ${DEST}/memos.db" >>"${LOG}"
 
 # Dawarich (PostgreSQL/PostGIS): consistent cluster dump via pg_dumpall.
 # --clean --if-exists adds DROP statements so the restore replays cleanly.
-docker exec custom-app-dawarich-db-1 pg_dumpall --clean --if-exists --username=dawarich 2>>"$LOG" \
-  | gzip > "$DEST/dawarich.sql.gz" || fail "Dawarich dump failed."
+docker exec custom-app-dawarich-db-1 pg_dumpall --clean --if-exists --username=dawarich 2>>"${LOG}" \
+  | gzip > "${DEST}/dawarich.sql.gz" || fail "Dawarich dump failed."
+echo "Dawarich dump OK -> ${DEST}/dawarich.sql.gz" >>"${LOG}"
+
+echo "$(date '+%F %T') app-backups completed successfully on ${HOST}" >>"${LOG}"
+cat "${LOG}"
