@@ -48,6 +48,23 @@
     }
 }
 
+# mTLS: require a client cert signed by /certs/client-ca.crt AND present in
+# /certs/allowed. Import into any site block to lock it down; leave it out to
+# keep an app open. One shared CA covers every app that imports this snippet.
+# `trust_pool file` supplies the CA (implies require_and_verify), and
+# `verifier leaf` restricts acceptance to the specific certs in /certs/allowed
+# so a leaked cert can be revoked by deleting its file (no CA rotation).
+(client_mtls) {
+    tls {
+        client_auth {
+            trust_pool file /certs/client-ca.crt
+            verifier leaf {
+                folder /certs/allowed
+            }
+        }
+    }
+}
+
 # ── App site blocks ────────────────────────────────────────────────
 # All sites share the single public entrypoint :35000 (the only port
 # forwarded on the router).  Caddy auto-provisions and renews the
@@ -60,6 +77,12 @@ YOUR_IMMICH_DOMAIN:35000 {
     import access_log
     encode zstd gzip
 
+    # Cap upload body size (biggest photo/video you'd upload at once) to
+    # bound memory/disk usage on the NAS.
+    request_body {
+        max_size 10GB
+    }
+
     reverse_proxy 192.168.1.200:30041
 }
 
@@ -68,6 +91,12 @@ YOUR_JELLYFIN_DOMAIN:35000 {
     import tls_13
     import security_headers
     import access_log
+
+    # Bound per-request size: Jellyfin transcodes/streams media, and a
+    # single oversized/malformed request can exhaust memory on the NAS.
+    request_body {
+        max_size 1GB
+    }
 
     handle /jellyfin {
         redir /jellyfin/ permanent
@@ -114,15 +143,26 @@ YOUR_DAWARICH_DOMAIN:35000 {
     import access_log
     encode zstd gzip
 
+    header {
+        Permissions-Policy "geolocation=(), microphone=(), camera=(), interest-cohort=()"
+    }
+
     reverse_proxy 192.168.1.200:30081
 }
 
-# Home Assistant
+# Home Assistant (mTLS-protected)
 YOUR_HA_DOMAIN:35000 {
+    import client_mtls
     import tls_13
     import security_headers
     import access_log
     encode zstd gzip
+
+    header {
+        # HA legitimately uses geolocation/microphone/camera, so allow them (self)
+        # instead of using the strict deny used on other apps.
+        Permissions-Policy "geolocation=(self), microphone=(self), camera=(self), interest-cohort=()"
+    }
 
     reverse_proxy YOUR_HA_VM_IP:80
 }

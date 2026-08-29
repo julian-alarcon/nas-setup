@@ -875,8 +875,8 @@ GPU: Nothing, click Next
 
 ##### Web setup for Home Assistant
 
-Web UI:
-  Log in at `http://homeassistant.local/` and create the admin account.
+Log in at `http://homeassistant.local/` (or `http://YOUR_HA_VM_IP/`) and create
+the admin account.
 
 External URL:
   Set to `https://YOUR_HA_DOMAIN:35000` (via **Settings -> System -> Network ->
@@ -887,10 +887,233 @@ Settings:
   System:
     Network:
       Home Assistant URL: `https://YOUR_HA_DOMAIN:35000`
+      Local network:
+        Automatic: `Checked`
       Http Server:
         Reverse proxy:
           Trust X-Forwarded-For: `Checked`
           Trusted proxies: `192.168.1.200/32`
+
+> [!CAUTION]
+> Do **not** add the Caddy IP to `trusted_networks` (HA's auth-bypass list, set
+> in `configuration.yaml`). That would let every proxied external request skip
+> HA's own login, leaving mTLS as the *only* gate. Keep HA login on; mTLS is a
+> layer in front, not a replacement.
+
+###### Internal and External URLs
+
+Set both under **Settings -> System -> Network** so HA generates correct links
+per path (mobile app, notifications, webhooks):
+
+- **Internal URL:** `http://YOUR_HA_VM_IP` (LAN, direct, no TLS/mTLS)
+- **External URL:** `https://YOUR_HA_DOMAIN:35000` (through Caddy, mTLS-gated)
+
+HA picks the internal URL for LAN clients and the external one otherwise, so
+local access stays direct and remote access goes through the mTLS edge.
+
+##### mTLS (client certificate auth) for any app
+
+Caddy (not the app) rejects anyone without a cert signed by your private CA,
+at the TLS edge, before the request reaches the proxied app.
+
+> **How it works** (diagram, edge-verification, reduced attack surface, and
+> caveats like expiry / no-revocation / shared-CA risk) is in
+> [`config/caddy/README.md`](config/caddy/README.md). This section is just the
+> step-by-step setup.
+
+One shared CA works for **all** apps: `client_auth` only checks that the client
+cert is signed by `/certs/client-ca.crt`, so a single CA + one `client.p12` per
+device is enough for every app that imports the snippet below.
+
+###### 1. Create a client CA + a client cert (on your laptop; ~5 min)
+
+Keep the **CA private key off the NAS**: whoever has it can mint client certs.
+And protect it on the laptop too: a backup or theft of `~/mtls` leaks the
+ability to mint certs for **every** mTLS app at once, so treat the whole
+directory like a password. Encrypt the CA key with a passphrase and tighten
+the file/dir permissions.
+
+```sh
+mkdir -m 700 -p ~/mtls && cd ~/mtls
+
+# 1. CA key + cert: this pair signs and issues every device cert.
+# Passphrase-protect the CA key
+openssl genrsa -aes256 -out client-ca.key 4096
+chmod 600 client-ca.key
+openssl req -x509 -new -key client-ca.key -days 3650 -out client-ca.crt \
+  -subj "/CN=mTLS CA"
+
+# 2. Device key + cert: signed by the CA, for one device (redo for each extra
+#    substituting DEVICE_NAME, e.g. my-laptop).
+openssl genrsa -out DEVICE_NAME.key 2048
+chmod 600 DEVICE_NAME.key
+openssl req -new -key DEVICE_NAME.key -out DEVICE_NAME.csr \
+  -subj "/CN=DEVICE_NAME"
+openssl x509 -req -in DEVICE_NAME.csr -CA client-ca.crt -CAkey client-ca.key \
+  -CAcreateserial -out DEVICE_NAME.crt -days 825
+
+# 3. Bundle the device key + cert + CA into one password-protected .p12.
+openssl pkcs12 -export -out DEVICE_NAME.p12 -inkey DEVICE_NAME.key \
+  -in DEVICE_NAME.crt -certfile client-ca.crt
+```
+
+> Redo the last block (section 2 + 3) for each additional device, replacing
+> `DEVICE_NAME` (e.g. `my-laptop`) everywhere and keeping the file names
+> aligned with the `CN`. Install the `DEVICE_NAME.p12` on each device rather
+> than shipping the `.key` + `.crt` separately (the single password-protected
+> `.p12` bundles key + cert + CA).
+>
+> Note: `client-ca.srl` is auto-created by `-CAcreateserial`; it just tracks
+> serial numbers so no two certs collide, and is not sensitive.
+
+> **Vault these now**, while they're in front of you (a laptop theft or disk
+> death later is exactly when you'll discover they were only on this machine):
+> - The **CA private key passphrase** (you just created it;
+>   losing it means you can no longer sign any new device cert)
+> - An **encrypted copy of `client-ca.key`** (without it you can't issue
+>   certs for any new device, which is a full lockout)
+> - One **backup `DEVICE_NAME.p12`** (your fail-closed re-entry cert)
+> - `client-ca.crt` (the public cert, handy for rebuilding the chain)
+>
+> Keep the CA key file itself out of the vault if you prefer surface
+> minimisation (but then the passphrase + a p12 backup in the vault are
+> mandatory, or a single laptop failure strands you).
+
+> The CA (−days 3650, 10 yrs) and device certs (−days 825, ~2.3 yrs) **expire
+> silently** and there is **no CRL**, so only a CA rotation can revoke a leaked
+> device cert. See the Caveats in
+> [`config/caddy/README.md`](config/caddy/README.md). Set a reminder ~30 days
+> before expiry to re-issue.
+
+###### 2. Mount the CA into Caddy
+
+```sh
+# From your NAS to create the directory
+mkdir -p /mnt/ssd-storage/apps-data/caddy/certs
+# From your local to copy cert to NAS
+scp ~/mtls/client-ca.crt \
+    admin@YOUR_NAS:/mnt/ssd-storage/apps-data/caddy/certs/client-ca.crt
+# From your NAS to improve permissions
+chmod 640 /mnt/ssd-storage/apps-data/caddy/certs/client-ca.crt
+```
+
+Add this line to `config/caddy/compose.yml` (then re-create the caddy app):
+
+```yaml
+      - /mnt/ssd-storage/apps-data/caddy/certs:/certs:ro
+```
+
+Only the `.crt` goes here: never the key.
+
+###### 3. Define the snippet once, import into each app
+
+Define the `client_mtls` snippet once (near the other reusable snippets at the
+top of the `Caddyfile`):
+
+```caddyfile
+(client_mtls) {
+    tls {
+        client_auth {
+            trust_pool file /certs/client-ca.crt
+            verifier leaf {
+                folder /certs/allowed
+            }
+        }
+    }
+}
+```
+
+`trust_pool` supplies the CA (implies `require_and_verify`). `verifier leaf`
+adds a per-cert allowlist: a cert is accepted only if it is signed by the CA
+**and** its file is present in `/certs/allowed/`. This is what lets you revoke a
+single leaked cert without rotating the whole CA.
+
+Then import it into **every** site block you want to lock. Home Assistant:
+
+```caddyfile
+YOUR_HA_DOMAIN:35000 {
+    import client_mtls
+    import tls_13
+    import security_headers
+    import access_log
+    encode zstd gzip
+    reverse_proxy YOUR_HA_VM_IP:80
+}
+```
+
+To lock any other app, add the same `import client_mtls` to its block. To
+unlock one, remove that import. Reload after edits:
+
+```sh
+docker exec custom-app-caddy-1 caddy validate --config /etc/caddy/Caddyfile
+docker exec custom-app-caddy-1 caddy reload --config /etc/caddy/Caddyfile
+```
+
+###### 4. Install the cert per device
+
+Before a device can connect, its **public** cert must be allowed. Create the
+`allowed/` folder on the NAS (once, if not already done):
+
+```sh
+mkdir -p /mnt/ssd-storage/apps-data/caddy/certs/allowed
+```
+
+Then, **from your laptop** (where `~/mtls/DEVICE_NAME.crt` lives), copy each
+device's public cert up to the NAS, renaming it to `.pem` on the way:
+
+```sh
+scp ~/mtls/DEVICE_NAME.crt \
+    admin@YOUR_NAS:/mnt/ssd-storage/apps-data/caddy/certs/allowed/DEVICE_NAME.pem
+```
+
+> [!IMPORTANT] Files in `allowed/` must end in `.pem`
+> Caddy's `verifier leaf { folder ... }` loader only reads files whose name ends
+> in `.pem` (case-insensitive); any other extension (`.crt`, `.cer`, ...) is
+> **silently skipped**, so the cert never enters the allowlist and the device is
+> rejected at the handshake with `client leaf certificate failed validation`.
+> The `scp` above renames `DEVICE_NAME.crt` to `DEVICE_NAME.pem` on the NAS. The
+> CA path (`trust_pool file /certs/client-ca.crt`) is explicit, so its extension
+> is irrelevant, only the `allowed/` folder cares.
+
+Only the public cert goes here, never the key. The folder is served to the
+container already (read-only via the `/certs:ro` mount). After adding or
+removing a cert, reload Caddy.
+
+- **Browser:** import `client.p12` into the OS/browser cert store (Firefox:
+  Settings -> Privacy & Security -> Certificates -> Import). It then presents
+automatically to any mTLS app (`https://YOUR_HA_DOMAIN:35000`).
+  - **Chromium on Ubuntu (snap):** the snap is confined and does **not** read
+    the default NSS DB (`~/.pki/nssdb`), so a GUI/`certutil` import there is
+    ignored. Import into the snap's own NSS DB instead:
+
+    ```sh
+    pk12util -d sql:$HOME/snap/chromium/current/.local/share/pki/nssdb \
+      -i ~/mtls/DEVICE_NAME.p12
+    ```
+
+    `current` is a symlink to the active snap revision (e.g. `3507`); use it so
+    the path survives snap updates. Create the dir first if missing:
+    `mkdir -p $HOME/snap/chromium/current/.local/share/pki/nssdb`. Restart
+    Chromium afterwards.
+- **HA mobile app:** install the `.p12`/`.crt`+`.key` into the device cert
+  store and trust it.
+- **curl:** `curl --cacert ~/mtls/client-ca.crt --cert ~/mtls/DEVICE_NAME.crt
+  --key ~/mtls/DEVICE_NAME.key https://YOUR_HA_DOMAIN:35000/`
+
+###### Verify
+
+- With cert: loads normally. Without cert: handshake error, app untouched.
+- `trust_pool` + `verifier leaf` fail closed: a cert is accepted only if it is
+  CA-signed **and** present in `/certs/allowed/`. If you lose every client cert
+  you are locked out. Keep one `client.p12` **and** the CA key (and its
+  passphrase) safe before rolling this out.
+- **Revoking a leaked cert:** delete its file from `/certs/allowed/` and
+  reload. No CA rotation, other devices unaffected.
+- **Adding a device:** copy its cert into `/certs/allowed/` as
+  `DEVICE_NAME.pem` (must end in `.pem`) and reload.
+- Rotating a device: sign a new cert with the same CA and install it (and add
+  it to `/certs/allowed/` as `*.pem`). Rotating the *CA*: new `client-ca.crt`,
+  update the `trust_pool` path, re-issue and re-add every device cert.
 
 ### Data Protection
 

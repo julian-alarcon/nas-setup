@@ -14,6 +14,7 @@ services:
       - /mnt/ssd-storage/apps-data/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - /mnt/ssd-storage/apps-data/caddy/data:/data
       - /mnt/ssd-storage/apps-data/caddy/config:/config
+      - /mnt/ssd-storage/apps-data/caddy/certs:/certs:ro # CA cert + allowed/ folder for mTLS
     environment:
       # Cloudflare API token with Zone:DNS:Edit permission.
       # https://developers.cloudflare.com/api/tokens/create/
