@@ -859,7 +859,7 @@ Network Interface:
 Installation Media: Nothing, click Next
 GPU: Nothing, click Next
 
-##### DNS and port forwarding for Home Assistant
+###### DNS and port forwarding for Home Assistant
 
 - DNS: `YOUR_HA_DOMAIN` is a static CNAME -> `YOUR_ANCHOR_DOMAIN` (see the DNS
   model section).
@@ -867,7 +867,7 @@ GPU: Nothing, click Next
   Caddy routes it by `Host` header and obtains the certificate over the DNS
   challenge.
 
-##### Web setup for Home Assistant
+###### Web setup for Home Assistant
 
 Log in at `http://homeassistant.local/` (or `http://YOUR_HA_VM_IP/`) and create
 the admin account.
@@ -904,6 +904,15 @@ per path (mobile app, notifications, webhooks):
 
 HA picks the internal URL for LAN clients and the external one otherwise, so
 local access stays direct and remote access goes through the mTLS edge.
+
+###### Setup Home Asistant vocie
+
+Documentation [Set up a fully local voice assistant](https://www.home-assistant.io/voice_control/voice_remote_local_assistant/)
+
+1. Install: Speech-to-Phrase and Piper.
+2. Set in [Home Assistants](http://homeassistant.local/config/voice-assistants/assistants)
+  the Home Assistantm, in Speech-to-text set `speech-to-phrase` and in
+  Text-to-speech set language `en_US` and voice `libritts (high)`
 
 ##### mTLS (client certificate auth) for any app
 
