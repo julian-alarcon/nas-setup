@@ -5,7 +5,7 @@ services:
     # ACME DNS-01 challenge works without a custom build.
     # https://github.com/caddybuilds/caddy-cloudflare
     # https://hub.docker.com/r/caddybuilds/caddy-cloudflare/tags
-    image: caddybuilds/caddy-cloudflare:2.11.4-alpine
+    image: caddybuilds/caddy-cloudflare:2.11.7-alpine
     restart: always
     container_name: custom-app-caddy-1
     ports:

@@ -422,7 +422,7 @@ with **Zone › DNS › Edit** permission for your zone and set it as
 Set new custom app with name `custom-app-caddy`. Install via custom YAML using
 [`config/caddy/compose.yml`](config/caddy/compose.yml), which references the
 pre-built [`caddybuilds/caddy-cloudflare`](https://github.com/caddybuilds/caddy-cloudflare)
-image (Caddy v2.11.4 with the Cloudflare DNS module already compiled in, no
+image (Caddy v2.11 with the Cloudflare DNS module already compiled in, no
 custom build needed). Fill in `CLOUDFLARE_API_TOKEN` with your Cloudflare API
 token.
 
@@ -764,7 +764,7 @@ rotating it invalidates all sessions.
 3. **Install via custom YAML**: use
    [`config/dawarich/compose.yml`](config/dawarich/compose.yml), adapted from the
    [official compose](https://github.com/Freika/dawarich/blob/master/docker/docker-compose.yml):
-   named volumes replaced by bind mounts; image pinned to `1.11.0` (not
+   named volumes replaced by bind mounts; image pinned to `1.16.0` (not
    `:latest`); `PUID`/`PGID` set to `568`; resource limits sized for a 2-user
    household. Only `dawarich_app` publishes a host port (`30081` -> container
    `3000`), matching the `dawarich` site block in the Caddyfile.
@@ -805,7 +805,7 @@ Log in at `https://YOUR_DAWARICH_DOMAIN:35000/` with the seeded admin
 
 Based on [Installing HAOS in a VM on TrueNAS CE](https://community.home-assistant.io/t/installing-haos-in-a-vm-on-truenas-ce/511393)
 
-Home Assistant runs on its own **VM** (e.g. 2 cores, 2 GB RAM) with its own IP
+Home Assistant runs on its own **VM** (e.g. 2 cores, 3 GiB RAM) with its own IP
 on the same LAN as the TrueNAS host, *not* on the NAS machine itself. Its web
 UI listens on port `80` by default. It is published through Caddy at
 `https://YOUR_HA_DOMAIN:35000/` on the shared public entrypoint.
@@ -846,8 +846,7 @@ CPU And Memory:
   Cores: `2`
   Threads: `1`
   CPU Mode: `Host Passtrought`
-  Memory Size: `2 GiB`
-  Minimum Memory Size: `512 MiB`
+  Memory Size: `3 GiB`
 Disks:
   Use existing disk image
   Select Disk Type: `VirtIO`
@@ -905,7 +904,7 @@ per path (mobile app, notifications, webhooks):
 HA picks the internal URL for LAN clients and the external one otherwise, so
 local access stays direct and remote access goes through the mTLS edge.
 
-###### Setup Home Asistant vocie
+###### Setup Home Asistant voice
 
 Documentation [Set up a fully local voice assistant](https://www.home-assistant.io/voice_control/voice_remote_local_assistant/)
 

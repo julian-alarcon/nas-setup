@@ -3,7 +3,7 @@
 name: qbittorrent
 services:
   qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:5.2.1 # https://gitlab.com/Linuxserver.io/docker-qbittorrent/container_registry/774438
+    image: lscr.io/linuxserver/qbittorrent:5.2.4 # https://gitlab.com/Linuxserver.io/docker-qbittorrent/container_registry/774438
     restart: always
     container_name: custom-app-qbittorrent-1
     environment:

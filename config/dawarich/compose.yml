@@ -1,6 +1,6 @@
 services:
   dawarich_db:
-    image: postgis/postgis:17-3.5-alpine # https://github.com/postgis/docker-postgis/releases
+    image: postgis/postgis:17-3.6-alpine # https://github.com/postgis/docker-postgis/releases
     container_name: custom-app-dawarich-db-1
     restart: always
     shm_size: 256M
@@ -47,7 +47,7 @@ services:
     pids_limit: 100
 
   dawarich_app:
-    image: freikin/dawarich:1.11.0 # https://github.com/Freika/dawarich/releases
+    image: freikin/dawarich:1.16.0 # https://github.com/Freika/dawarich/releases
     container_name: custom-app-dawarich-app-1
     restart: unless-stopped
     entrypoint: web-entrypoint.sh
@@ -106,11 +106,11 @@ services:
       test: ["CMD-SHELL", "wget -qO - http://127.0.0.1:3000/api/v1/health | grep -q '\"status\"\\s*:\\s*\"ok\"'"]
       interval: 10s
       retries: 30
-      start_period: 30s
+      start_period: 10m
       timeout: 10s
 
   dawarich_sidekiq:
-    image: freikin/dawarich:1.11.0
+    image: freikin/dawarich:1.16.0
     container_name: custom-app-dawarich-sidekiq-1
     restart: unless-stopped
     entrypoint: sidekiq-entrypoint.sh
